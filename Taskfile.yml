@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: Apache-2.0
+
+version: '3'
+
+vars:
+  COMPOSE: docker compose --env-file .env -f docker/docker-compose.yml
+
+tasks:
+  ensure-env:
+    internal: true
+    cmds:
+      - test -f .env || cp .env.example .env
+
+  up:
+    desc: Start the local QuickSense infrastructure stack.
+    deps: [ensure-env]
+    cmds:
+      - scripts/up.sh
+
+  down:
+    desc: Stop containers and keep volumes.
+    deps: [ensure-env]
+    cmds:
+      - '{{.COMPOSE}} down'
+
+  clean:
+    desc: Stop containers and remove volumes.
+    deps: [ensure-env]
+    cmds:
+      - '{{.COMPOSE}} down -v --remove-orphans'
+
+  ps:
+    desc: Show service status and health.
+    deps: [ensure-env]
+    cmds:
+      - '{{.COMPOSE}} ps'
+
+  logs:
+    desc: Tail stack logs, optionally for one service with `task logs -- polaris`.
+    deps: [ensure-env]
+    cmds:
+      - '{{.COMPOSE}} logs -f {{.CLI_ARGS}}'
+
+  bootstrap:
+    desc: Create the MinIO bucket, Polaris catalog, and verify Keycloak OIDC.
+    deps: [ensure-env]
+    cmds:
+      - scripts/bootstrap.sh
+
+  roundtrip:
+    desc: Write Iceberg rows with Spark and read them back with Trino.
+    deps: [ensure-env]
+    cmds:
+      - '{{.COMPOSE}} exec -T spark /opt/spark/bin/spark-submit /workspace/scripts/roundtrip/spark_write.py'
+      - '{{.COMPOSE}} run --rm --no-deps trino-client python /workspace/scripts/roundtrip/trino_read.py'
+
+  test:
+    desc: Start, bootstrap, and run the raw Spark-to-Trino round-trip.
+    cmds:
+      - task: up
+      - task: bootstrap
+      - task: roundtrip

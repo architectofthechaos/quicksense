@@ -1,0 +1,59 @@
+{
+  "realm": "quicksense",
+  "enabled": true,
+  "roles": {
+    "realm": [
+      {
+        "name": "polaris_admin",
+        "description": "Future Polaris principal role mapping target."
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "quicksense-api",
+      "name": "QuickSense API",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${KEYCLOAK_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "serviceAccountsEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "redirectUris": [
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "+"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-quicksense-api",
+      "enabled": true,
+      "serviceAccountClientId": "quicksense-api",
+      "realmRoles": [
+        "polaris_admin"
+      ]
+    },
+    {
+      "username": "qsuser",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "QuickSense",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KEYCLOAK_TEST_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "polaris_admin"
+      ]
+    }
+  ]
+}
