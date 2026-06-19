@@ -10,3 +10,8 @@ dist/
 build/
 *.egg-info/
 
+# Go API build artifacts
+api/bin/
+*.test
+*.out
+
