@@ -60,3 +60,26 @@ tasks:
       - task: up
       - task: bootstrap
       - task: roundtrip
+
+  kind-up:
+    desc: Start a local kind Kubernetes cluster for QuickSense.
+    deps: [ensure-env]
+    cmds:
+      - scripts/k8s/kind-up.sh
+
+  kind-bootstrap:
+    desc: Bootstrap the kind cluster with MinIO bucket, Polaris catalog, and verify Keycloak OIDC.
+    deps: [ensure-env]
+    cmds:
+      - scripts/k8s/kind-bootstrap.sh
+
+  kind-roundtrip:
+    desc: Write Iceberg rows with Spark and read them back with Trino on kind.
+    deps: [ensure-env]
+    cmds:
+      - scripts/k8s/kind-roundtrip.sh
+
+  kind-down:
+    desc: Stop and delete the kind cluster.
+    cmds:
+      - kind delete cluster --name quicksense

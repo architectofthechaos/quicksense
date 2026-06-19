@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import re
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -139,3 +140,29 @@ def test_readme_documents_quickstart_ports_credentials_and_oidc_note():
         "Keycloak is wired but not enforced",
     ]:
         assert needle in readme
+
+
+@pytest.mark.xfail(reason="Phase A WIP — files land across A2-A11", strict=False)
+def test_k8s_required_files_exist():
+    required = [
+        "deploy/k8s/kind-cluster.yaml",
+        "deploy/k8s/base/postgres.yaml",
+        "deploy/k8s/base/minio.yaml",
+        "deploy/k8s/base/polaris.yaml",
+        "deploy/k8s/base/trino.yaml",
+        "deploy/k8s/base/keycloak.yaml",
+        "deploy/k8s/base/spark.yaml",
+        "deploy/k8s/README.md",
+        "scripts/k8s/kind-up.sh",
+        "scripts/k8s/kind-bootstrap.sh",
+        "scripts/k8s/kind-roundtrip.sh",
+    ]
+    assert not [p for p in required if not (ROOT / p).is_file()]
+
+
+def test_taskfile_exposes_kind_tasks():
+    tf = read("Taskfile.yml")
+    for t in ["kind-up", "kind-bootstrap", "kind-roundtrip", "kind-down"]:
+        assert re.search(rf"(?m)^  {re.escape(t)}:\s*$", tf), t
+    for n in ["scripts/k8s/kind-up.sh", "scripts/k8s/kind-bootstrap.sh", "scripts/k8s/kind-roundtrip.sh"]:
+        assert n in tf
