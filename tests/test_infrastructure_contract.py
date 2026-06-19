@@ -270,3 +270,13 @@ def test_keycloak_manifest():
     mount_paths = {vm["mountPath"] for vm in c["volumeMounts"]}
     assert "/opt/keycloak/data/import" in mount_paths
     assert ":latest" not in read("deploy/k8s/base/keycloak.yaml")
+
+
+def test_kind_up_script_contract():
+    s = read("scripts/k8s/kind-up.sh")
+    for n in ["kind create cluster", "--name quicksense", "deploy/k8s/kind-cluster.yaml",
+        "kind load docker-image quicksense-spark:latest", "--from-env-file",
+        "kubectl create secret generic qs-secrets", "--from-file=config.properties=docker/trino/etc/config.properties",
+        "docker/keycloak/realm-quicksense.json", "scripts/roundtrip/spark_write.py",
+        "kubectl rollout status", "--for=condition=complete"]:
+        assert n in s, n
