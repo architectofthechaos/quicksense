@@ -106,12 +106,18 @@ def test_engine_configs_wire_polaris_and_minio():
 
 def test_bootstrap_and_roundtrip_contract_markers():
     bootstrap = read("scripts/bootstrap.sh")
+    lib = read("scripts/lib/bootstrap-common.sh")
     spark_write = read("scripts/roundtrip/spark_write.py")
     trino_read = read("scripts/roundtrip/trino_read.py")
     realm = read("docker/keycloak/realm-quicksense.json")
 
+    # Markers that moved to the shared lib
     for needle in ["warehouse", "quicksense", "KEYCLOAK OK", "stsUnavailable", "CATALOG_MANAGE_CONTENT"]:
-        assert needle in bootstrap
+        assert needle in lib, needle
+
+    # bootstrap.sh must still carry its own markers and source the lib
+    assert "BOOTSTRAP OK" in bootstrap
+    assert "scripts/lib/bootstrap-common.sh" in bootstrap
 
     for needle in ["CREATE NAMESPACE IF NOT EXISTS quicksense.demo", "CREATE TABLE IF NOT EXISTS quicksense.demo.events", "INSERT INTO quicksense.demo.events"]:
         assert needle in spark_write
@@ -168,8 +174,21 @@ def test_k8s_required_files_exist():
         "scripts/k8s/kind-up.sh",
         "scripts/k8s/kind-bootstrap.sh",
         "scripts/k8s/kind-roundtrip.sh",
+        "scripts/lib/bootstrap-common.sh",
     ]
     assert not [p for p in required if not (ROOT / p).is_file()]
+
+
+def test_kind_bootstrap_script_contract():
+    s = read("scripts/k8s/kind-bootstrap.sh")
+    lib = read("scripts/lib/bootstrap-common.sh")
+    assert "scripts/lib/bootstrap-common.sh" in s
+    assert "kubectl port-forward" in s
+    assert "minio/mc:RELEASE.2025-08-13T08-35-41Z" in s
+    assert "BOOTSTRAP OK" in s
+    for n in ["/api/catalog/v1/oauth/tokens", "Polaris-Realm", "PRINCIPAL_ROLE:ALL",
+              "stsUnavailable", "CATALOG_MANAGE_CONTENT", "KEYCLOAK OK"]:
+        assert n in lib, n
 
 
 def test_taskfile_exposes_kind_tasks():
