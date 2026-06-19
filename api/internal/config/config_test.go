@@ -1,0 +1,137 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package config_test
+
+import (
+	"testing"
+
+	"github.com/deepiq/quicksense/api/internal/config"
+)
+
+// fakeEnv returns a getenv func backed by the provided map.
+func fakeEnv(m map[string]string) func(string) string {
+	return func(key string) string {
+		return m[key]
+	}
+}
+
+// fullEnv is a complete, valid env map derived from .env.example values.
+var fullEnv = map[string]string{
+	"POSTGRES_USER":        "postgres",
+	"POSTGRES_PASSWORD":    "postgres",
+	"POSTGRES_PORT":        "5432",
+	"POLARIS_PORT":         "8181",
+	"POLARIS_REALM":        "POLARIS",
+	"POLARIS_CLIENT_ID":    "root",
+	"POLARIS_CLIENT_SECRET": "s3cr3t",
+	"POLARIS_CATALOG":      "quicksense",
+	"KEYCLOAK_PORT":        "8082",
+	"KEYCLOAK_REALM":       "quicksense",
+	"KEYCLOAK_CLIENT_ID":   "quicksense-api",
+	"KEYCLOAK_CLIENT_SECRET": "qs-api-secret",
+}
+
+func TestLoadFrom_AllFields(t *testing.T) {
+	cfg, err := config.LoadFrom(fakeEnv(fullEnv))
+	if err != nil {
+		t.Fatalf("LoadFrom returned error: %v", err)
+	}
+
+	// Postgres fields
+	if cfg.PostgresUser != "postgres" {
+		t.Errorf("PostgresUser = %q; want %q", cfg.PostgresUser, "postgres")
+	}
+	if cfg.PostgresPassword != "postgres" {
+		t.Errorf("PostgresPassword = %q; want %q", cfg.PostgresPassword, "postgres")
+	}
+	if cfg.PostgresPort != "5432" {
+		t.Errorf("PostgresPort = %q; want %q", cfg.PostgresPort, "5432")
+	}
+
+	// Derived DSN for the QUICKSENSE database
+	wantDSN := "postgres://postgres:postgres@postgres:5432/QUICKSENSE?sslmode=disable"
+	if cfg.DSN != wantDSN {
+		t.Errorf("DSN = %q; want %q", cfg.DSN, wantDSN)
+	}
+
+	// Admin DSN (points to 'postgres' maintenance DB)
+	wantAdminDSN := "postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable"
+	if cfg.AdminDSN != wantAdminDSN {
+		t.Errorf("AdminDSN = %q; want %q", cfg.AdminDSN, wantAdminDSN)
+	}
+
+	// Polaris fields
+	if cfg.PolarisPort != "8181" {
+		t.Errorf("PolarisPort = %q; want %q", cfg.PolarisPort, "8181")
+	}
+	if cfg.PolarisRealm != "POLARIS" {
+		t.Errorf("PolarisRealm = %q; want %q", cfg.PolarisRealm, "POLARIS")
+	}
+	if cfg.PolarisClientID != "root" {
+		t.Errorf("PolarisClientID = %q; want %q", cfg.PolarisClientID, "root")
+	}
+	if cfg.PolarisClientSecret != "s3cr3t" {
+		t.Errorf("PolarisClientSecret = %q; want %q", cfg.PolarisClientSecret, "s3cr3t")
+	}
+	if cfg.PolarisCatalog != "quicksense" {
+		t.Errorf("PolarisCatalog = %q; want %q", cfg.PolarisCatalog, "quicksense")
+	}
+
+	// Keycloak fields
+	if cfg.KeycloakPort != "8082" {
+		t.Errorf("KeycloakPort = %q; want %q", cfg.KeycloakPort, "8082")
+	}
+	if cfg.KeycloakRealm != "quicksense" {
+		t.Errorf("KeycloakRealm = %q; want %q", cfg.KeycloakRealm, "quicksense")
+	}
+	if cfg.KeycloakClientID != "quicksense-api" {
+		t.Errorf("KeycloakClientID = %q; want %q", cfg.KeycloakClientID, "quicksense-api")
+	}
+	if cfg.KeycloakClientSecret != "qs-api-secret" {
+		t.Errorf("KeycloakClientSecret = %q; want %q", cfg.KeycloakClientSecret, "qs-api-secret")
+	}
+
+	// Derived JWKS URL
+	wantJWKS := "http://keycloak:8082/realms/quicksense/protocol/openid-connect/certs"
+	if cfg.KeycloakJWKSURL != wantJWKS {
+		t.Errorf("KeycloakJWKSURL = %q; want %q", cfg.KeycloakJWKSURL, wantJWKS)
+	}
+
+	// Default required role
+	if cfg.RequiredRole != "polaris_admin" {
+		t.Errorf("RequiredRole = %q; want %q", cfg.RequiredRole, "polaris_admin")
+	}
+}
+
+func TestLoadFrom_CustomHosts(t *testing.T) {
+	env := make(map[string]string)
+	for k, v := range fullEnv {
+		env[k] = v
+	}
+	env["POSTGRES_HOST"] = "mydb.internal"
+	env["POLARIS_HOST"] = "polaris.internal"
+	env["KEYCLOAK_HOST"] = "kc.internal"
+
+	cfg, err := config.LoadFrom(fakeEnv(env))
+	if err != nil {
+		t.Fatalf("LoadFrom error: %v", err)
+	}
+
+	wantDSN := "postgres://postgres:postgres@mydb.internal:5432/QUICKSENSE?sslmode=disable"
+	if cfg.DSN != wantDSN {
+		t.Errorf("DSN = %q; want %q", cfg.DSN, wantDSN)
+	}
+
+	wantJWKS := "http://kc.internal:8082/realms/quicksense/protocol/openid-connect/certs"
+	if cfg.KeycloakJWKSURL != wantJWKS {
+		t.Errorf("KeycloakJWKSURL = %q; want %q", cfg.KeycloakJWKSURL, wantJWKS)
+	}
+}
+
+func TestLoadFrom_MissingRequired(t *testing.T) {
+	// Empty env — all required vars missing; should return a non-nil error.
+	_, err := config.LoadFrom(fakeEnv(map[string]string{}))
+	if err == nil {
+		t.Fatal("expected error for missing required vars, got nil")
+	}
+}
