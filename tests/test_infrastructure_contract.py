@@ -177,3 +177,96 @@ def test_taskfile_exposes_kind_tasks():
         assert re.search(rf"(?m)^  {re.escape(t)}:\s*$", tf), t
     for n in ["scripts/k8s/kind-up.sh", "scripts/k8s/kind-bootstrap.sh", "scripts/k8s/kind-roundtrip.sh"]:
         assert n in tf
+
+
+# ---------------------------------------------------------------------------
+# Tasks A3–A7: base K8s service manifests
+# ---------------------------------------------------------------------------
+
+
+def k8s_docs(path):
+    return [d for d in yaml.safe_load_all(read(path)) if d]
+
+
+def test_postgres_manifest():
+    docs = k8s_docs("deploy/k8s/base/postgres.yaml")
+    assert {"Deployment", "Service", "PersistentVolumeClaim"} <= {d["kind"] for d in docs}
+    svc = next(d for d in docs if d["kind"] == "Service")
+    assert svc["metadata"]["name"] == "postgres"
+    c = next(d for d in docs if d["kind"] == "Deployment")["spec"]["template"]["spec"]["containers"][0]
+    assert c["image"] == "postgres:16"
+    assert {list(f)[0] for f in c["envFrom"]} >= {"configMapRef", "secretRef"}
+    assert ":latest" not in read("deploy/k8s/base/postgres.yaml")
+
+
+def test_minio_manifest():
+    docs = k8s_docs("deploy/k8s/base/minio.yaml")
+    assert {"Deployment", "Service", "PersistentVolumeClaim"} <= {d["kind"] for d in docs}
+    svc = next(d for d in docs if d["kind"] == "Service")
+    assert svc["metadata"]["name"] == "minio"
+    c = next(d for d in docs if d["kind"] == "Deployment")["spec"]["template"]["spec"]["containers"][0]
+    assert c["image"] == "minio/minio:RELEASE.2025-09-07T16-13-09Z"
+    assert {list(f)[0] for f in c["envFrom"]} >= {"configMapRef", "secretRef"}
+    assert ":latest" not in read("deploy/k8s/base/minio.yaml")
+    # NodePort assertions
+    ports = {p["port"]: p.get("nodePort") for p in svc["spec"]["ports"]}
+    assert ports.get(9000) == 30900
+    assert ports.get(9001) == 30901
+
+
+def test_polaris_manifest():
+    docs = k8s_docs("deploy/k8s/base/polaris.yaml")
+    kinds = {d["kind"] for d in docs}
+    assert {"Job", "Deployment", "Service"} <= kinds
+    svc = next(d for d in docs if d["kind"] == "Service")
+    assert svc["metadata"]["name"] == "polaris"
+    # Bootstrap Job image
+    job = next(d for d in docs if d["kind"] == "Job")
+    job_container = job["spec"]["template"]["spec"]["containers"][0]
+    assert job_container["image"] == "apache/polaris-admin-tool:1.5.0"
+    # Deployment image
+    c = next(d for d in docs if d["kind"] == "Deployment")["spec"]["template"]["spec"]["containers"][0]
+    assert c["image"] == "apache/polaris:1.5.0"
+    assert {list(f)[0] for f in c["envFrom"]} >= {"configMapRef", "secretRef"}
+    # Dotted feature-flag env keys present
+    env_names = {e["name"] for e in c["env"]}
+    assert 'polaris.features."ALLOW_INSECURE_STORAGE_TYPES"' in env_names
+    assert 'polaris.features."ALLOW_SETTING_S3_ENDPOINTS"' in env_names
+    assert 'polaris.features."SUPPORTED_CATALOG_STORAGE_TYPES"' in env_names
+    # JDBC URL
+    jdbc = next(e["value"] for e in c["env"] if e["name"] == "QUARKUS_DATASOURCE_JDBC_URL")
+    assert "jdbc:postgresql://postgres:5432/" in jdbc
+    assert ":latest" not in read("deploy/k8s/base/polaris.yaml")
+
+
+def test_trino_manifest():
+    docs = k8s_docs("deploy/k8s/base/trino.yaml")
+    assert {"Deployment", "Service"} <= {d["kind"] for d in docs}
+    svc = next(d for d in docs if d["kind"] == "Service")
+    assert svc["metadata"]["name"] == "trino"
+    c = next(d for d in docs if d["kind"] == "Deployment")["spec"]["template"]["spec"]["containers"][0]
+    assert c["image"] == "trinodb/trino:481"
+    assert {list(f)[0] for f in c["envFrom"]} >= {"configMapRef", "secretRef"}
+    # Two ConfigMap volume mounts
+    mount_paths = {vm["mountPath"] for vm in c["volumeMounts"]}
+    assert "/etc/trino" in mount_paths
+    assert "/etc/trino/catalog" in mount_paths
+    assert ":latest" not in read("deploy/k8s/base/trino.yaml")
+
+
+def test_keycloak_manifest():
+    docs = k8s_docs("deploy/k8s/base/keycloak.yaml")
+    assert {"Deployment", "Service"} <= {d["kind"] for d in docs}
+    svc = next(d for d in docs if d["kind"] == "Service")
+    assert svc["metadata"]["name"] == "keycloak"
+    deploy = next(d for d in docs if d["kind"] == "Deployment")
+    c = deploy["spec"]["template"]["spec"]["containers"][0]
+    assert c["image"] == "quay.io/keycloak/keycloak:26.3.3"
+    assert {list(f)[0] for f in c["envFrom"]} >= {"configMapRef", "secretRef"}
+    # Import-realm args
+    assert "start-dev" in c["args"]
+    assert "--import-realm" in c["args"]
+    # Realm volume mount
+    mount_paths = {vm["mountPath"] for vm in c["volumeMounts"]}
+    assert "/opt/keycloak/data/import" in mount_paths
+    assert ":latest" not in read("deploy/k8s/base/keycloak.yaml")
