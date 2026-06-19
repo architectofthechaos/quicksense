@@ -4,6 +4,7 @@
 from pathlib import Path
 import re
 import pytest
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -140,6 +141,16 @@ def test_readme_documents_quickstart_ports_credentials_and_oidc_note():
         "Keycloak is wired but not enforced",
     ]:
         assert needle in readme
+
+
+def test_kind_cluster_config():
+    cfg = yaml.safe_load(read("deploy/k8s/kind-cluster.yaml"))
+    assert cfg["kind"] == "Cluster" and cfg["apiVersion"].startswith("kind.x-k8s.io/")
+    nodes = cfg["nodes"]
+    assert sum(1 for n in nodes if n["role"] == "control-plane") == 1
+    mapped = {m["hostPort"] for n in nodes for m in n.get("extraPortMappings", [])}
+    for port in [8181, 9000, 9001, 4040, 8080, 8082]:
+        assert port in mapped, port
 
 
 @pytest.mark.xfail(reason="Phase A WIP — files land across A2-A11", strict=False)

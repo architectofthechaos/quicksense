@@ -1,0 +1,22 @@
+# kind (Kubernetes-in-Docker) cluster configuration for quicksense local development
+# https://kind.sigs.k8s.io/docs/user/configuration/
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+
+nodes:
+  - role: control-plane
+    # extraPortMappings expose host ports via NodePort Services in tasks A3–A9
+    # containerPort (NodePort range 30000–32767) → hostPort (browser-friendly)
+    extraPortMappings:
+      - containerPort: 30181
+        hostPort: 8181  # Polaris REST catalog API
+      - containerPort: 30900
+        hostPort: 9000  # MinIO API
+      - containerPort: 30901
+        hostPort: 9001  # MinIO web console
+      - containerPort: 30040
+        hostPort: 4040  # Spark UI / driver logs
+      - containerPort: 30080
+        hostPort: 8080  # Trino UI
+      - containerPort: 30082
+        hostPort: 8082  # Keycloak
