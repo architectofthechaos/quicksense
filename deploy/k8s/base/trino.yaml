@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: Apache-2.0
+# Trino — NodePort Service (8080→30080) + Deployment with trino-etc/trino-catalog ConfigMap mounts
+# Mirrors docker/docker-compose.yml service `trino`.
+#
+# Two ConfigMaps (trino-etc and trino-catalog) are created by kind-up.sh (Task A8)
+# from docker/trino/etc/ and docker/trino/etc/catalog/ respectively. A flat ConfigMap
+# cannot represent the catalog/ subdirectory, so they are mounted at separate paths.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trino
+spec:
+  type: NodePort
+  selector:
+    app: trino
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trino
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: trino
+  template:
+    metadata:
+      labels:
+        app: trino
+    spec:
+      containers:
+        - name: trino
+          image: trinodb/trino:481
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: qs-config
+            - secretRef:
+                name: qs-secrets
+          volumeMounts:
+            - name: trino-etc
+              mountPath: /etc/trino
+            - name: trino-catalog
+              mountPath: /etc/trino/catalog
+          readinessProbe:
+            httpGet:
+              path: /v1/info
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /v1/info
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: trino-etc
+          configMap:
+            name: trino-etc
+        - name: trino-catalog
+          configMap:
+            name: trino-catalog
