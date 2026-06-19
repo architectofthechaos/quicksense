@@ -159,7 +159,6 @@ def test_kind_cluster_config():
         assert port in mapped, port
 
 
-@pytest.mark.xfail(reason="Phase A WIP — files land across A2-A11", strict=False)
 def test_k8s_required_files_exist():
     required = [
         "deploy/k8s/kind-cluster.yaml",
@@ -171,6 +170,7 @@ def test_k8s_required_files_exist():
         "deploy/k8s/base/spark.yaml",
         "deploy/k8s/base/trino-read-job.yaml",
         "deploy/k8s/README.md",
+        "deploy/k8s/config/README.md",
         "scripts/k8s/kind-up.sh",
         "scripts/k8s/kind-bootstrap.sh",
         "scripts/k8s/kind-roundtrip.sh",
@@ -312,3 +312,17 @@ def test_spark_manifest_and_roundtrip():
     rt = read("scripts/k8s/kind-roundtrip.sh")
     assert "kubectl exec" in rt and "spark-submit /workspace/scripts/roundtrip/spark_write.py" in rt
     assert "trino_read.py" in rt and "quicksense-trino-client:latest" in rt and "ROUNDTRIP OK" in rt
+
+
+def test_k8s_readme_documents_kind_path():
+    d = read("deploy/k8s/README.md")
+    for n in ["kind", "task kind-up", "task kind-bootstrap", "task kind-roundtrip", "task kind-down",
+              "kind load docker-image", "Spark Connect"]:
+        assert n in d, n
+
+
+def test_root_readme_documents_two_tiers():
+    r = read("README.md")
+    for n in ["task kind-up", "task kind-bootstrap", "task kind-roundtrip", "task kind-down",
+              "dev mode", "Kubernetes"]:
+        assert n in r, n

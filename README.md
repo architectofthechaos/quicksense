@@ -2,6 +2,19 @@
 
 QuickSense Sprint 1 is a local lakehouse stack: Polaris, MinIO, Spark, Trino, Keycloak, and Postgres for Polaris persistence.
 
+## Two runtimes
+
+QuickSense ships two local runtimes that share the same images and `.env` configuration:
+
+| Runtime | Commands | When to use |
+| --- | --- | --- |
+| **Docker Compose** — dev mode | `task up` / `task bootstrap` / `task roundtrip` / `task clean` | Fast iteration; containers start in seconds |
+| **kind** — Kubernetes tier | `task kind-up` / `task kind-bootstrap` / `task kind-roundtrip` / `task kind-down` | Validates Kubernetes manifests and the K8s config pipeline |
+
+Both runtimes expose the same `localhost` ports and use the same credentials. See
+[deploy/k8s/README.md](deploy/k8s/README.md) for the full Kubernetes tier guide, including
+prerequisites, the `.env` → ConfigMap/Secret mapping, and the port table.
+
 ## 60-second quickstart
 
 Install Docker and [Task](https://taskfile.dev), then run:
