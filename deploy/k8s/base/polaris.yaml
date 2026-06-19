@@ -38,7 +38,7 @@ spec:
             - -c
           args:
             - >-
-              /opt/polaris-admin-tool bootstrap
+              java -jar /deployments/polaris-admin-tool.jar bootstrap
               --realm=POLARIS
               --credential=POLARIS,root,s3cr3t
               || [ $? -eq 3 ]
