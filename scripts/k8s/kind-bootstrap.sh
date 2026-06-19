@@ -20,6 +20,8 @@ set +a
 # shellcheck source=scripts/lib/bootstrap-common.sh
 source "${ROOT_DIR}/scripts/lib/bootstrap-common.sh"
 
+kubectl config use-context "kind-quicksense" >/dev/null 2>&1 || { echo "kind cluster 'quicksense' not found — run 'task kind-up' first" >&2; exit 1; }
+
 # ---------------------------------------------------------------------------
 # Start port-forwards so helpers' localhost:${PORT} URLs reach the cluster.
 # ---------------------------------------------------------------------------

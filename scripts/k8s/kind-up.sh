@@ -58,6 +58,8 @@ else
   echo "Kind cluster 'quicksense' already exists — skipping creation."
 fi
 
+kubectl config use-context "kind-quicksense" >/dev/null
+
 # ---------------------------------------------------------------------------
 # Load locally-built images into the cluster so pods can pull them with
 # imagePullPolicy: IfNotPresent without reaching a registry.

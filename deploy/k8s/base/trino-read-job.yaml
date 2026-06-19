@@ -13,6 +13,7 @@ metadata:
   name: trino-read
 spec:
   backoffLimit: 2
+  ttlSecondsAfterFinished: 600
   template:
     spec:
       restartPolicy: Never

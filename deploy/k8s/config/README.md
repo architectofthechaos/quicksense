@@ -40,7 +40,7 @@ The three keys set this way in `polaris.yaml`:
 
 - `polaris.features."ALLOW_INSECURE_STORAGE_TYPES"` = `true`
 - `polaris.features."ALLOW_SETTING_S3_ENDPOINTS"` = `true`
-- `polaris.features."SUPPORTED_CATALOG_STORAGE_TYPES"` = `FILE,S3`
+- `polaris.features."SUPPORTED_CATALOG_STORAGE_TYPES"` = `["FILE","S3","GCS","AZURE"]`
 
 These are local-dev-only flags and are not expected to change per environment, so embedding them
 in the manifest is intentional.

@@ -27,6 +27,7 @@ metadata:
   name: polaris-bootstrap
 spec:
   backoffLimit: 6
+  ttlSecondsAfterFinished: 600
   template:
     spec:
       restartPolicy: OnFailure
@@ -39,8 +40,8 @@ spec:
           args:
             - >-
               java -jar /deployments/polaris-admin-tool.jar bootstrap
-              --realm=POLARIS
-              --credential=POLARIS,root,s3cr3t
+              --realm=$(POLARIS_REALM)
+              --credential=$(POLARIS_REALM),$(POLARIS_CLIENT_ID),$(POLARIS_CLIENT_SECRET)
               || [ $? -eq 3 ]
           envFrom:
             - configMapRef:
@@ -120,9 +121,9 @@ spec:
             - name: QUARKUS_DATASOURCE_PASSWORD
               value: "$(POSTGRES_PASSWORD)"
             - name: POLARIS_REALM_CONTEXT_REALMS
-              value: POLARIS
+              value: "$(POLARIS_REALM)"
             - name: POLARIS_BOOTSTRAP_CREDENTIALS
-              value: "POLARIS,root,s3cr3t"
+              value: "$(POLARIS_REALM),$(POLARIS_CLIENT_ID),$(POLARIS_CLIENT_SECRET)"
             - name: QUARKUS_OTEL_SDK_DISABLED
               value: "true"
             - name: AWS_REGION

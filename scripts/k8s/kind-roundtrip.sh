@@ -21,6 +21,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT_DIR}"
 
+kubectl config use-context "kind-quicksense" >/dev/null 2>&1 || { echo "kind cluster 'quicksense' not found — run 'task kind-up' first" >&2; exit 1; }
+
 # ---------------------------------------------------------------------------
 # Step 1: Spark write via spark-submit inside the Spark Connect pod
 # ---------------------------------------------------------------------------

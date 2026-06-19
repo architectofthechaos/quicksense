@@ -2,7 +2,8 @@
 # Spark Connect — NodePort Service (4040→30040, 15002 ClusterIP-style) + Deployment
 # Mirrors docker/docker-compose.yml service `spark`.
 #
-# The container command mirrors Compose exactly:
+# The container command is equivalent to the Compose command but chains steps
+# with && (intentional fail-fast improvement over the Compose newline form):
 #   render-spark-defaults.sh && /opt/spark/sbin/start-connect-server.sh \
 #     --conf spark.driver.bindAddress=0.0.0.0 \
 #     --conf spark.driver.host=spark \

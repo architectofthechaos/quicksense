@@ -55,10 +55,6 @@ spec:
               value: "$(KEYCLOAK_ADMIN_PASSWORD)"
             - name: KC_HEALTH_ENABLED
               value: "true"
-            - name: KEYCLOAK_CLIENT_SECRET
-              value: "$(KEYCLOAK_CLIENT_SECRET)"
-            - name: KEYCLOAK_TEST_PASSWORD
-              value: "$(KEYCLOAK_TEST_PASSWORD)"
           volumeMounts:
             - name: keycloak-realm
               mountPath: /opt/keycloak/data/import
