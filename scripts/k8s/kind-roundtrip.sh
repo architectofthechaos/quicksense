@@ -38,7 +38,7 @@ echo "Applying trino-read Job (quicksense-trino-client:latest runs trino_read.py
 kubectl apply -f deploy/k8s/base/trino-read-job.yaml
 
 echo "Waiting for trino-read Job to complete (timeout 180s)..."
-kubectl wait --for=condition=complete job/trino-read --timeout=180s
+kubectl wait --for=condition=complete job/trino-read --timeout=180s || { echo "trino-read Job did not complete:" >&2; kubectl logs job/trino-read >&2 || true; exit 1; }
 
 echo "Capturing trino-read logs..."
 TRINO_LOGS="$(kubectl logs job/trino-read)"

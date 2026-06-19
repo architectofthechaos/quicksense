@@ -10,7 +10,7 @@
 #
 # The `roundtrip-scripts` ConfigMap (created by kind-up.sh from scripts/roundtrip/)
 # is mounted at /workspace/scripts/roundtrip so that kind-roundtrip.sh can call
-# `kubectl exec deploy/spark -- spark-submit /workspace/scripts/roundtrip/spark_write.py`.
+# `kubectl exec deploy/spark -- /opt/spark/bin/spark-submit /workspace/scripts/roundtrip/spark_write.py`.
 #
 # Both ports are in a single NodePort Service:
 #   - port 15002: Spark Connect gRPC (no hostPort mapping in Phase A; Phase B port-forwards)
