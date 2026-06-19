@@ -58,14 +58,12 @@ func PrincipalFromContext(ctx context.Context) (*Principal, bool) {
 // header. Returns ("", false) if the header is absent or uses a different scheme.
 func bearerToken(r *http.Request) (string, bool) {
 	hdr := r.Header.Get("Authorization")
-	if hdr == "" {
-		return "", false
-	}
 	const prefix = "Bearer "
-	if !strings.HasPrefix(hdr, prefix) {
+	// RFC 7235 §2.1: the auth-scheme token is case-insensitive ("bearer" == "Bearer").
+	if len(hdr) < len(prefix) || !strings.EqualFold(hdr[:len(prefix)], prefix) {
 		return "", false
 	}
-	tok := strings.TrimPrefix(hdr, prefix)
+	tok := strings.TrimSpace(hdr[len(prefix):])
 	if tok == "" {
 		return "", false
 	}

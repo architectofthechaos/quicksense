@@ -88,6 +88,14 @@ func TestRequireAuth_Middleware(t *testing.T) {
 			wantCalled: true,
 			wantUser:   "alice",
 		},
+		{
+			name:       "lowercase bearer scheme accepted (RFC 7235 case-insensitive)",
+			authHeader: "bearer valid.token",
+			verifier:   &fakeVerifier{principal: okPrincipal},
+			wantStatus: http.StatusOK,
+			wantCalled: true,
+			wantUser:   "alice",
+		},
 	}
 
 	for _, tc := range tests {
