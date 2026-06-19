@@ -57,7 +57,7 @@ kubectl run qs-mc-bucket \
   --env="MINIO_ROOT_USER=${MINIO_ROOT_USER}" \
   --env="MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}" \
   --env="MINIO_BUCKET=${MINIO_BUCKET:-warehouse}" \
-  -- sh -c 'mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" && mc mb --ignore-existing local/"$MINIO_BUCKET"'
+  --command -- /bin/sh -c 'mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" && mc mb --ignore-existing local/"$MINIO_BUCKET"'
 
 # ---------------------------------------------------------------------------
 # Polaris catalog + grants + Keycloak — identical to Compose bootstrap.
