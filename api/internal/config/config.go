@@ -109,8 +109,6 @@ func LoadFrom(getenv func(string) string) (*Config, error) {
 
 	requiredRole := withDefault("REQUIRED_ROLE", "polaris_admin")
 
-	_ = polarisHost // used by later tasks (polaris.Client base URL)
-
 	return &Config{
 		PostgresHost:     pgHost,
 		PostgresUser:     pgUser,
