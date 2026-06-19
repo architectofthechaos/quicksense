@@ -1,0 +1,99 @@
+# SPDX-License-Identifier: Apache-2.0
+# Spark Connect — NodePort Service (4040→30040, 15002 ClusterIP-style) + Deployment
+# Mirrors docker/docker-compose.yml service `spark`.
+#
+# The container command mirrors Compose exactly:
+#   render-spark-defaults.sh && /opt/spark/sbin/start-connect-server.sh \
+#     --conf spark.driver.bindAddress=0.0.0.0 \
+#     --conf spark.driver.host=spark \
+#     --conf spark.ui.port=4040 && tail -F /opt/spark/logs/*
+#
+# The `roundtrip-scripts` ConfigMap (created by kind-up.sh from scripts/roundtrip/)
+# is mounted at /workspace/scripts/roundtrip so that kind-roundtrip.sh can call
+# `kubectl exec deploy/spark -- spark-submit /workspace/scripts/roundtrip/spark_write.py`.
+#
+# Both ports are in a single NodePort Service:
+#   - port 15002: Spark Connect gRPC (no hostPort mapping in Phase A; Phase B port-forwards)
+#   - port 4040:  Spark UI (nodePort 30040 → kind extraPortMapping 30040→hostPort 4040)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark
+spec:
+  type: NodePort
+  selector:
+    app: spark
+  ports:
+    - name: connect
+      port: 15002
+      targetPort: 15002
+    - name: ui
+      port: 4040
+      targetPort: 4040
+      nodePort: 30040
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark
+  template:
+    metadata:
+      labels:
+        app: spark
+    spec:
+      containers:
+        - name: spark
+          image: quicksense-spark:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 15002
+            - containerPort: 4040
+          envFrom:
+            - configMapRef:
+                name: qs-config
+            - secretRef:
+                name: qs-secrets
+          command: ["/bin/bash", "-lc"]
+          args:
+            - >-
+              render-spark-defaults.sh &&
+              /opt/spark/sbin/start-connect-server.sh
+              --conf spark.driver.bindAddress=0.0.0.0
+              --conf spark.driver.host=spark
+              --conf spark.ui.port=4040 &&
+              tail -F /opt/spark/logs/*
+          volumeMounts:
+            - name: roundtrip-scripts
+              mountPath: /workspace/scripts/roundtrip
+              readOnly: true
+          startupProbe:
+            tcpSocket:
+              port: 15002
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 24
+          readinessProbe:
+            tcpSocket:
+              port: 15002
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: 15002
+            initialDelaySeconds: 120
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: roundtrip-scripts
+          configMap:
+            name: roundtrip-scripts

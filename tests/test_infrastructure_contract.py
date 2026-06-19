@@ -163,6 +163,7 @@ def test_k8s_required_files_exist():
         "deploy/k8s/base/trino.yaml",
         "deploy/k8s/base/keycloak.yaml",
         "deploy/k8s/base/spark.yaml",
+        "deploy/k8s/base/trino-read-job.yaml",
         "deploy/k8s/README.md",
         "scripts/k8s/kind-up.sh",
         "scripts/k8s/kind-bootstrap.sh",
@@ -280,3 +281,15 @@ def test_kind_up_script_contract():
         "docker/keycloak/realm-quicksense.json", "scripts/roundtrip/spark_write.py",
         "kubectl rollout status", "--for=condition=complete"]:
         assert n in s, n
+
+
+def test_spark_manifest_and_roundtrip():
+    docs = k8s_docs("deploy/k8s/base/spark.yaml")
+    c = next(d for d in docs if d["kind"] == "Deployment")["spec"]["template"]["spec"]["containers"][0]
+    assert c["image"] == "quicksense-spark:latest" and c["imagePullPolicy"] in ("Never", "IfNotPresent")
+    svc = next(d for d in docs if d["kind"] == "Service")
+    assert svc["metadata"]["name"] == "spark"
+    assert {15002, 4040} <= {p["port"] for p in svc["spec"]["ports"]}
+    rt = read("scripts/k8s/kind-roundtrip.sh")
+    assert "kubectl exec" in rt and "spark-submit /workspace/scripts/roundtrip/spark_write.py" in rt
+    assert "trino_read.py" in rt and "quicksense-trino-client:latest" in rt and "ROUNDTRIP OK" in rt

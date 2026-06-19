@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+# trino-read Job — runs scripts/roundtrip/trino_read.py against the live Trino service.
+#
+# Applied by scripts/k8s/kind-roundtrip.sh after spark_write.py has written data.
+# The script deletes any prior run (`kubectl delete job trino-read --ignore-not-found`)
+# before applying this manifest to ensure idempotency.
+#
+# The `roundtrip-scripts` ConfigMap is created by kind-up.sh from scripts/roundtrip/.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: trino-read
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: trino-read
+          image: quicksense-trino-client:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TRINO_HOST
+              value: trino
+            - name: TRINO_PORT
+              value: "8080"
+          command:
+            - python
+            - /workspace/scripts/roundtrip/trino_read.py
+          volumeMounts:
+            - name: roundtrip-scripts
+              mountPath: /workspace/scripts/roundtrip
+              readOnly: true
+      volumes:
+        - name: roundtrip-scripts
+          configMap:
+            name: roundtrip-scripts
