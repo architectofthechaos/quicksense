@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 from datetime import datetime
 
 from pyspark.sql import SparkSession
@@ -14,7 +15,11 @@ EXPECTED_ROWS = [
 
 
 def main() -> None:
-    spark = SparkSession.builder.appName("quicksense-raw-iceberg-write").getOrCreate()
+    builder = SparkSession.builder.appName("quicksense-raw-iceberg-write")
+    sc_remote = os.environ.get("SC_REMOTE")
+    if sc_remote:
+        builder = builder.remote(sc_remote)
+    spark = builder.getOrCreate()
 
     spark.sql("CREATE NAMESPACE IF NOT EXISTS quicksense.demo")
     spark.sql(

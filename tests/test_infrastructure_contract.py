@@ -493,3 +493,77 @@ def test_bootstrap_creates_polaris_admin_principal_role():
 
     kind_bootstrap = read("scripts/k8s/kind-bootstrap.sh")
     assert "ensure_polaris_admin_principal_role" in kind_bootstrap
+
+
+# ---------------------------------------------------------------------------
+# Task B21: SC_REMOTE round-trip mode + api.yaml Deployment/RBAC + build targets
+# ---------------------------------------------------------------------------
+
+
+def test_spark_write_sc_remote_mode():
+    """spark_write.py must support opt-in SC_REMOTE remote mode while keeping
+    Phase A / Compose byte-compatibility (getOrCreate path unchanged)."""
+    sw = read("scripts/roundtrip/spark_write.py")
+    assert ".remote(" in sw, "SC_REMOTE remote() call missing"
+    # Phase A needles must still be present
+    for needle in [
+        "CREATE NAMESPACE IF NOT EXISTS quicksense.demo",
+        "CREATE TABLE IF NOT EXISTS quicksense.demo.events",
+        "INSERT INTO quicksense.demo.events",
+    ]:
+        assert needle in sw, needle
+
+
+def test_api_yaml_deployment_rbac_and_service():
+    """deploy/k8s/api.yaml must contain a Deployment, Service, ServiceAccount,
+    Role/RoleBinding for sparkconnects, and the serviceAccountName field."""
+    docs = k8s_docs("deploy/k8s/api.yaml")
+    kinds = {d["kind"] for d in docs}
+    assert "Deployment" in kinds, "Deployment missing from api.yaml"
+    assert "Service" in kinds, "Service missing from api.yaml"
+    assert "ServiceAccount" in kinds, "ServiceAccount missing from api.yaml"
+
+    raw = read("deploy/k8s/api.yaml")
+    assert "sparkconnects" in raw, "sparkconnects RBAC missing from api.yaml"
+    assert "serviceAccountName" in raw, "serviceAccountName missing from api.yaml"
+
+    # Deployment must reference the locally-built image
+    deploy = next(d for d in docs if d["kind"] == "Deployment")
+    c = deploy["spec"]["template"]["spec"]["containers"][0]
+    assert "quicksense-api" in c["image"]
+
+    # Service must expose port 8090
+    svc = next(d for d in docs if d["kind"] == "Service")
+    ports = [p["port"] for p in svc["spec"]["ports"]]
+    assert 8090 in ports, f"Port 8090 not found in Service ports: {ports}"
+
+
+def test_taskfile_exposes_api_build_and_run():
+    """Taskfile.yml must expose api-build and api-run targets."""
+    tf = read("Taskfile.yml")
+    assert re.search(r"(?m)^  api-build:\s*$", tf), "api-build target missing"
+    assert re.search(r"(?m)^  api-run:\s*$", tf), "api-run target missing"
+    assert "api-build" in tf
+    assert "api-run" in tf
+
+
+# ---------------------------------------------------------------------------
+# Task B22: api-e2e end-to-end script + Taskfile target
+# ---------------------------------------------------------------------------
+
+
+def test_api_e2e_and_assets():
+    """Taskfile must expose api-e2e; scripts/k8s/api-e2e.sh must contain the
+    full e2e flow markers."""
+    tf = read("Taskfile.yml")
+    assert re.search(r"(?m)^  api-e2e:\s*$", tf), "api-e2e target missing"
+    assert "scripts/k8s/api-e2e.sh" in tf
+
+    e2e = read("scripts/k8s/api-e2e.sh")
+    for needle in [
+        "API E2E OK",
+        "/v1/clusters",
+        "/v1/catalogs",
+        "openid-connect/token",
+    ]:
+        assert needle in e2e, f"Missing '{needle}' in api-e2e.sh"
