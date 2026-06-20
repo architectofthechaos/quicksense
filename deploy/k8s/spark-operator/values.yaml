@@ -1,23 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Helm values for kubeflow/spark-operator chart 2.4.0
+# Helm values for kubeflow/spark-operator chart 2.5.1
 #
-# These are best-effort values based on the chart 2.4.0 value structure.
+# These are best-effort values based on the chart 2.5.1 value structure.
 # The controller runs the live install (task operator-install) and reconciles
 # any key-name drift between this file and the actual chart defaults.
 #
 # Air-gapped constraint: pin every image — NO :latest.
 # Chart repo: https://kubeflow.github.io/spark-operator
-# Chart version: 2.4.0
+# Chart version: 2.5.1
 
 # ---------------------------------------------------------------------------
-# Operator image — pinned to chart 2.4.0
+# Operator image — pinned to chart 2.5.1
 # Best-effort key names; live install reconciles any drift.
 # ---------------------------------------------------------------------------
 image:
   registry: ghcr.io
   repository: kubeflow/spark-operator/controller
-  tag: "2.4.0"
+  tag: "2.5.1"
   pullPolicy: IfNotPresent
 
 # ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ image:
 # SparkConnect custom resources.  The Go API creates SparkConnect CRs in
 # this namespace (SPEC-002 §B.7).
 #
-# chart 2.4.0 key: spark.jobNamespaces
+# chart 2.5.1 key: spark.jobNamespaces
 # ---------------------------------------------------------------------------
 spark:
   jobNamespaces:
@@ -40,7 +40,7 @@ spark:
 # that the operator uses to inject driver/executor sidecars and validate
 # SparkApplication/SparkConnect specs.
 #
-# chart 2.4.0 key: webhook.enable
+# chart 2.5.1 key: webhook.enable
 # ---------------------------------------------------------------------------
 webhook:
   enable: true
@@ -49,7 +49,7 @@ webhook:
 # RBAC
 #
 # The chart's controller ClusterRole covers management of all CRDs it ships,
-# including sparkconnects.sparkoperator.k8s.io (present in chart >= 2.4.0).
+# including sparkconnects.sparkoperator.k8s.io (present in chart >= 2.5.1).
 # No extra RBAC override is required here; this section is a placeholder so
 # the live install can add namespace-scoped overrides if needed.
 # ---------------------------------------------------------------------------

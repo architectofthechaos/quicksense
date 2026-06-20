@@ -3,14 +3,14 @@
 #
 # operator-install.sh — install the kubeflow Spark Operator via Helm (pinned).
 #
-# Chart:   spark-operator 2.4.0 (https://kubeflow.github.io/spark-operator)
+# Chart:   spark-operator 2.5.1 (https://kubeflow.github.io/spark-operator)
 # Operator namespace: spark-operator
 # Watched namespace:  quicksense (SparkConnect / SparkApplication CRs)
 #
 # Air-gapped note: mirror the chart and image before running offline:
-#   helm pull spark-operator/spark-operator --version 2.4.0
-#   docker pull ghcr.io/kubeflow/spark-operator/controller:2.4.0
-#   kind load docker-image ghcr.io/kubeflow/spark-operator/controller:2.4.0 \
+#   helm pull spark-operator/spark-operator --version 2.5.1
+#   docker pull ghcr.io/kubeflow/spark-operator/controller:2.5.1
+#   kind load docker-image ghcr.io/kubeflow/spark-operator/controller:2.5.1 \
 #     --name quicksense
 #
 # Prerequisites: kind cluster 'quicksense' running ('task kind-up').
@@ -48,9 +48,9 @@ kubectl create namespace quicksense --dry-run=client -o yaml | kubectl apply -f 
 # ---------------------------------------------------------------------------
 # Install / upgrade the operator
 # ---------------------------------------------------------------------------
-echo "Installing spark-operator chart 2.4.0 into namespace 'spark-operator'..."
+echo "Installing spark-operator chart 2.5.1 into namespace 'spark-operator'..."
 helm upgrade --install spark-operator spark-operator/spark-operator \
-  --version 2.4.0 \
+  --version 2.5.1 \
   --namespace spark-operator \
   --create-namespace \
   -f "${ROOT_DIR}/deploy/k8s/spark-operator/values.yaml" \
@@ -58,7 +58,7 @@ helm upgrade --install spark-operator spark-operator/spark-operator \
 
 # ---------------------------------------------------------------------------
 # Smoke-check: verify the SparkConnect CRD landed
-# (SparkConnect CRD ships with chart >= 2.4.0; verified live in task B17)
+# (SparkConnect CRD ships with chart >= 2.5.1; verified live in task B17)
 # ---------------------------------------------------------------------------
 echo "Verifying SparkConnect CRD..."
 kubectl get crd sparkconnects.sparkoperator.k8s.io
