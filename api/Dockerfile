@@ -14,7 +14,13 @@
 #   runtime.
 
 # ─── Stage 1: builder ────────────────────────────────────────────────────────
-FROM golang:1.26-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
+
+# TARGETOS/TARGETARCH are provided automatically by BuildKit and default to the
+# build host's platform, so a plain `docker build` on arm64 produces an arm64
+# binary (matching the kind node) and cross-builds work via `--platform`.
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /src
 
@@ -26,13 +32,16 @@ RUN go mod download
 # Copy the rest of the source.
 COPY . .
 
-# Build a fully static binary (CGO disabled for distroless compatibility).
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+# Build a fully static binary (CGO disabled for distroless compatibility),
+# targeting the requested platform.
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-arm64} \
     go build -trimpath -ldflags="-s -w" \
     -o /quicksense-api ./cmd/quicksense-api
 
 # ─── Stage 2: runtime ────────────────────────────────────────────────────────
-FROM gcr.io/distroless/static-debian12
+# :nonroot is a concrete, non-floating tag (avoids implicit :latest) and runs as
+# an unprivileged user. A sha256 digest pin is the stricter follow-up.
+FROM gcr.io/distroless/static-debian12:nonroot
 
 # Copy the static binary from the builder stage.
 COPY --from=builder /quicksense-api /quicksense-api
