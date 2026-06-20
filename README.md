@@ -50,7 +50,7 @@ All defaults are in `.env.example`. `task up` copies it to `.env` if needed. The
 
 `task bootstrap` is idempotent. It creates the MinIO bucket `warehouse`, creates the Polaris catalog `quicksense` with base location `s3://warehouse/quicksense`, grants the dev catalog role content privileges, and verifies Keycloak can issue a client-credentials token by printing `KEYCLOAK OK`.
 
-Polaris uses the internal realm `POLARIS` with `root:s3cr3t` for Sprint 1 engine access. Keycloak is enforced on the QuickSense API: every `/v1/*` request requires a valid Keycloak JWT carrying the `polaris_admin` realm role (Phase B). Polaris is additionally configured with an external OIDC tenant pointing at the `quicksense` realm (see Phase B below); in the dev tier `polaris.authentication.type=internal` is used so the internal `root:s3cr3t` credential keeps working — Polaris 1.5 accepts only `internal` or `external` (no mixed mode).
+Polaris uses the internal realm `POLARIS` with `root:s3cr3t` for Sprint 1 engine access. Keycloak is enforced on the QuickSense API: every `/v1/*` request requires a valid Keycloak JWT carrying the `polaris_admin` realm role (Phase B). Polaris runs in **mixed** mode (`polaris.authentication.type=mixed`) and accepts BOTH the internal `root:s3cr3t` credential AND Keycloak JWTs simultaneously — live-verified on Polaris 1.5. A Keycloak JWT with realm role `polaris_admin` is mapped to Polaris principal role `admin` (via `^polaris_(.*)` → `PRINCIPAL_ROLE:$1`) and resolved by `preferred_username` to the bootstrap-created Polaris principal `service-account-quicksense-api`.
 
 For local MinIO, the Polaris catalog is created with `stsUnavailable: true`. In Polaris 1.5 this disables storage credential vending, so Spark and Trino use the static MinIO development credentials from `.env` while still authenticating to Polaris over OAuth2 client credentials.
 
@@ -101,18 +101,24 @@ The Kubeflow `spark-operator` Helm chart **2.5.1** is installed into the kind cl
 - Chart and operator image are documented for air-gapped mirroring in
   `deploy/k8s/spark-operator/NOTES.md`
 
-### Polaris external OIDC
+### Polaris mixed-mode OIDC
 
-Polaris is configured with an external OIDC tenant (`quarkus.oidc.*`) pointing at the
-Keycloak `quicksense` realm, with a principal-roles mapper (`^polaris_(.*)` →
-`PRINCIPAL_ROLE:$1`) and a bootstrap-created Polaris principal role `admin`.
+Polaris runs in **mixed** mode (`polaris.authentication.type=mixed`) — live-verified
+on Polaris 1.5. Mixed mode accepts BOTH the internal `root:s3cr3t` credential AND
+Keycloak JWTs simultaneously with no compromise.
 
-**Important caveat:** Apache Polaris 1.5's `polaris.authentication.type` is per-realm
-and accepts only `internal` or `external` — there is no `mixed` mode. The dev tier
-uses `internal` so the internal `root:s3cr3t` path (used by the API and bootstrap
-scripts) keeps working. Setting it to `external` enables Polaris to accept Keycloak
-JWTs directly but disables the internal credential. These two modes cannot be active
-simultaneously.
+The OIDC tenant (`quarkus.oidc.*`) points at the Keycloak `quicksense` realm. The
+principal-roles mapper (`^polaris_(.*)` → `PRINCIPAL_ROLE:$1`) maps the Keycloak realm
+role `polaris_admin` to the Polaris principal role `admin`. The principal-mapper
+resolves the JWT identity by `preferred_username` (claim path
+`polaris.oidc.principal-mapper.name-claim-path=preferred_username`) to the Polaris
+principal `service-account-quicksense-api`, which is created by
+`ensure_polaris_external_principal` during bootstrap. The `admin` principal role is
+bound to `catalog_admin` on the `quicksense` catalog by
+`ensure_polaris_admin_principal_role`.
+
+Note: `id-claim-path=sub` must NOT be configured — Polaris parses the principal id as
+a numeric long, and a UUID `sub` claim causes NumberFormatException (400).
 
 ### Phase B task sequence
 

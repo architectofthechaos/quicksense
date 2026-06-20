@@ -132,14 +132,23 @@ spec:
               value: "$(MINIO_ROOT_USER)"
             - name: AWS_SECRET_ACCESS_KEY
               value: "$(MINIO_ROOT_PASSWORD)"
-            # Auth type: Polaris 1.5 accepts ONLY "internal" or "external" per realm
-            # (no "mixed" value exists — live-verified against Polaris 1.5.0).
-            # Dev uses "internal" so root:s3cr3t keeps working for the API and bootstrap.
-            # To enable direct Keycloak-JWT acceptance, flip to "external"; this disables
-            # root:s3cr3t. The external OIDC tenant below stays CONFIGURED so the flip
-            # is a one-line change when needed (B20).
-            # The ^polaris_(.*) mapper turns the Keycloak realm role `polaris_admin` into
-            # the Polaris principal role `admin` (PRINCIPAL_ROLE:admin).
+            # Auth: Polaris 1.5 supports MIXED mode (enum INTERNAL/EXTERNAL/MIXED) — live-verified.
+            # Mixed mode accepts BOTH the internal root:s3cr3t credential AND Keycloak JWTs
+            # simultaneously. A previous commit incorrectly set this to "internal"; this is
+            # the correct production-validated value.
+            #
+            # Principal resolution: polaris.oidc.principal-mapper.name-claim-path=preferred_username
+            # is REQUIRED. Without it Polaris cannot extract a principal from the JWT and returns
+            # 401 "Failed to resolve principal". It resolves by NAME to a Polaris principal
+            # (service-account-quicksense-api) created by ensure_polaris_external_principal in
+            # bootstrap. Do NOT set id-claim-path=sub — Polaris parses the id as a numeric long
+            # and a UUID sub throws NumberFormatException (400).
+            #
+            # The ^polaris_(.*) mapper turns Keycloak realm role `polaris_admin` into
+            # Polaris principal role `admin` (PRINCIPAL_ROLE:admin), bound to catalog_admin
+            # on the quicksense catalog by ensure_polaris_admin_principal_role in bootstrap.
+            #
+            # Live-verified: Keycloak JWT → list-namespaces on quicksense catalog → 200.
             - { name: quarkus.oidc.tenant-enabled, value: "true" }
             - { name: quarkus.oidc.auth-server-url, value: "http://keycloak:8082/realms/quicksense" }
             - { name: quarkus.oidc.client-id, value: "quicksense-api" }
@@ -147,7 +156,8 @@ spec:
             - { name: polaris.oidc.principal-roles-mapper.type, value: "default" }
             - { name: "polaris.oidc.principal-roles-mapper.mappings[0].regex", value: "^polaris_(.*)" }
             - { name: "polaris.oidc.principal-roles-mapper.mappings[0].replacement", value: "PRINCIPAL_ROLE:$1" }
-            - { name: polaris.authentication.type, value: "internal" }
+            - { name: polaris.oidc.principal-mapper.name-claim-path, value: "preferred_username" }
+            - { name: polaris.authentication.type, value: "mixed" }
             # Dotted Quarkus feature-flag keys — see KNOWN RISK note at top of file.
             - name: 'polaris.features."ALLOW_INSECURE_STORAGE_TYPES"'
               value: "true"

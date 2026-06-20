@@ -450,9 +450,12 @@ def test_spark_operator_assets_present_and_pinned():
 
 
 def test_polaris_manifest_has_external_oidc_config():
-    """Polaris Deployment env must contain external OIDC (Keycloak) tenant keys and
-    polaris.authentication.type=internal (Polaris 1.5 has no 'mixed'; dev uses internal
-    so root:s3cr3t keeps working; flip to external to enable direct Keycloak-JWT acceptance)."""
+    """Polaris Deployment env must contain external OIDC (Keycloak) tenant keys,
+    polaris.authentication.type=mixed (live-verified: Polaris 1.5 supports MIXED —
+    both internal root:s3cr3t and Keycloak JWTs accepted simultaneously), and
+    polaris.oidc.principal-mapper.name-claim-path=preferred_username (required for
+    Polaris to resolve the JWT principal by name; id-claim-path=sub must NOT be used
+    as Polaris parses the id as numeric and UUID sub throws NumberFormatException)."""
     raw = read("deploy/k8s/base/polaris.yaml")
     # OIDC tenant enabled
     assert "quarkus.oidc.tenant-enabled" in raw
@@ -472,8 +475,11 @@ def test_polaris_manifest_has_external_oidc_config():
     assert "PRINCIPAL_ROLE:$1" in raw
     # Internal realm name must still be present
     assert "POLARIS" in raw
-    # authentication.type must be present and set to "internal" (Polaris 1.5 — no "mixed").
-    # Use YAML parse to check the env value directly (comments may contain the word "mixed").
+    # name-claim-path must be set to preferred_username (the missing piece for principal resolution)
+    assert "polaris.oidc.principal-mapper.name-claim-path" in raw
+    assert "preferred_username" in raw
+    # authentication.type must be present and set to "mixed" (live-verified Polaris 1.5).
+    # Use YAML parse to check the env value directly (comments may also contain words).
     assert 'polaris.authentication.type' in raw
     docs = k8s_docs("deploy/k8s/base/polaris.yaml")
     deploy = next(d for d in docs if d["kind"] == "Deployment")
@@ -482,8 +488,16 @@ def test_polaris_manifest_has_external_oidc_config():
         (e for e in c["env"] if e.get("name") == "polaris.authentication.type"), None
     )
     assert auth_env is not None, "polaris.authentication.type env var missing"
-    assert auth_env["value"] == "internal", (
-        f"polaris.authentication.type must be 'internal', got {auth_env['value']!r}"
+    assert auth_env["value"] == "mixed", (
+        f"polaris.authentication.type must be 'mixed', got {auth_env['value']!r}"
+    )
+    # name-claim-path env var must also be set to preferred_username
+    name_claim_env = next(
+        (e for e in c["env"] if e.get("name") == "polaris.oidc.principal-mapper.name-claim-path"), None
+    )
+    assert name_claim_env is not None, "polaris.oidc.principal-mapper.name-claim-path env var missing"
+    assert name_claim_env["value"] == "preferred_username", (
+        f"name-claim-path must be 'preferred_username', got {name_claim_env['value']!r}"
     )
 
 
@@ -508,6 +522,21 @@ def test_bootstrap_creates_polaris_admin_principal_role():
 
     kind_bootstrap = read("scripts/k8s/kind-bootstrap.sh")
     assert "ensure_polaris_admin_principal_role" in kind_bootstrap
+
+
+def test_bootstrap_creates_polaris_external_principal():
+    """bootstrap-common.sh must contain ensure_polaris_external_principal that creates
+    the service-account-quicksense-api Polaris principal (the Keycloak service-account
+    token's preferred_username), and both bootstrap scripts must call it."""
+    lib = read("scripts/lib/bootstrap-common.sh")
+    assert "ensure_polaris_external_principal" in lib
+    assert "service-account-quicksense-api" in lib
+
+    bootstrap = read("scripts/bootstrap.sh")
+    assert "ensure_polaris_external_principal" in bootstrap
+
+    kind_bootstrap = read("scripts/k8s/kind-bootstrap.sh")
+    assert "ensure_polaris_external_principal" in kind_bootstrap
 
 
 # ---------------------------------------------------------------------------

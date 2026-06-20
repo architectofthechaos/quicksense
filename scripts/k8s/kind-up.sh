@@ -126,6 +126,15 @@ echo "Deploying postgres..."
 kubectl apply -f deploy/k8s/base/postgres.yaml
 kubectl rollout status deploy/postgres --timeout=180s
 
+# Deploy Keycloak before Polaris: Polaris performs OIDC discovery against the
+# Keycloak issuer URL at startup (mixed mode).  Deploying Keycloak first lets
+# the OIDC tenant initialize during Polaris startup rather than lazily on first
+# request.  Postgres must still be first because the polaris-bootstrap Job
+# needs it.
+echo "Deploying keycloak..."
+kubectl apply -f deploy/k8s/base/keycloak.yaml
+kubectl rollout status deploy/keycloak --timeout=180s
+
 echo "Deploying polaris..."
 kubectl apply -f deploy/k8s/base/polaris.yaml
 kubectl wait --for=condition=complete job/polaris-bootstrap --timeout=180s
@@ -145,10 +154,6 @@ kubectl rollout status deploy/spark --timeout=180s
 echo "Deploying trino..."
 kubectl apply -f deploy/k8s/base/trino.yaml
 kubectl rollout status deploy/trino --timeout=180s
-
-echo "Deploying keycloak..."
-kubectl apply -f deploy/k8s/base/keycloak.yaml
-kubectl rollout status deploy/keycloak --timeout=180s
 
 echo ""
 echo "KIND STACK UP"

@@ -217,6 +217,51 @@ ensure_polaris_admin_principal_role() {
   esac
 }
 
+ensure_polaris_external_principal() {
+  local token="$1"
+  local mgmt_base="http://localhost:${POLARIS_PORT:-8181}/api/management/v1"
+  local principal_name="service-account-quicksense-api"
+  local p_file="/tmp/quicksense-polaris-external-principal.json"
+  local p_status
+
+  # Check whether the principal already exists.
+  p_status="$(curl -s -o "${p_file}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${token}" \
+    -H "Polaris-Realm: ${POLARIS_REALM:-POLARIS}" \
+    "${mgmt_base}/principals/${principal_name}")"
+
+  if [[ "${p_status}" == "200" ]]; then
+    echo "Polaris principal ${principal_name} already exists"
+    return 0
+  fi
+
+  if [[ "${p_status}" != "404" ]]; then
+    echo "Unexpected Polaris principal lookup status ${p_status}" >&2
+    cat "${p_file}" >&2 || true
+    return 1
+  fi
+
+  # Create the principal.
+  p_status="$(curl -s -o "${p_file}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${token}" \
+    -H "Polaris-Realm: ${POLARIS_REALM:-POLARIS}" \
+    -H "Content-Type: application/json" \
+    -X POST \
+    "${mgmt_base}/principals" \
+    -d "{\"principal\":{\"name\":\"${principal_name}\"}}")"
+
+  case "${p_status}" in
+    200|201|409)
+      echo "Created Polaris principal ${principal_name}"
+      ;;
+    *)
+      echo "Unexpected Polaris principal create status ${p_status}" >&2
+      cat "${p_file}" >&2 || true
+      return 1
+      ;;
+  esac
+}
+
 verify_keycloak() {
   local token_url="http://localhost:${KEYCLOAK_PORT:-8082}/realms/${KEYCLOAK_REALM:-quicksense}/protocol/openid-connect/token"
   curl --fail-with-body -sS "${token_url}" \
