@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -106,6 +107,8 @@ func (s *PgStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 
 // CreateCluster inserts a new cluster record and returns it.
 // Maps unique-constraint violations (cr_name or workspace_id+name) to ErrConflict.
+// When p.WorkspaceID is empty, SQL NULL is bound so Postgres does not reject
+// the empty string as an invalid UUID (error code 22P02).
 func (s *PgStore) CreateCluster(ctx context.Context, p CreateClusterParams) (*Cluster, error) {
 	const q = `
 		INSERT INTO clusters (workspace_id, name, namespace, cr_name)
@@ -113,15 +116,24 @@ func (s *PgStore) CreateCluster(ctx context.Context, p CreateClusterParams) (*Cl
 		RETURNING id, workspace_id, name, namespace, cr_name, phase,
 		          COALESCE(connect_url, ''), created_at, updated_at`
 
+	var workspaceID any
+	if p.WorkspaceID != "" {
+		workspaceID = p.WorkspaceID
+	} // nil → SQL NULL
+
 	var c Cluster
+	var wsID pgtype.Text
 	err := s.pool.QueryRow(ctx, q,
-		p.WorkspaceID, p.Name, p.Namespace, p.CRName,
+		workspaceID, p.Name, p.Namespace, p.CRName,
 	).Scan(
-		&c.ID, &c.WorkspaceID, &c.Name, &c.Namespace, &c.CRName, &c.Phase,
+		&c.ID, &wsID, &c.Name, &c.Namespace, &c.CRName, &c.Phase,
 		&c.ConnectURL, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, mapPgError(err)
+	}
+	if wsID.Valid {
+		c.WorkspaceID = wsID.String
 	}
 	return &c, nil
 }
@@ -135,12 +147,16 @@ func (s *PgStore) GetCluster(ctx context.Context, id string) (*Cluster, error) {
 		FROM clusters WHERE id = $1`
 
 	var c Cluster
+	var wsID pgtype.Text
 	err := s.pool.QueryRow(ctx, q, id).Scan(
-		&c.ID, &c.WorkspaceID, &c.Name, &c.Namespace, &c.CRName, &c.Phase,
+		&c.ID, &wsID, &c.Name, &c.Namespace, &c.CRName, &c.Phase,
 		&c.ConnectURL, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, mapPgError(err)
+	}
+	if wsID.Valid {
+		c.WorkspaceID = wsID.String
 	}
 	return &c, nil
 }
@@ -161,11 +177,15 @@ func (s *PgStore) ListClusters(ctx context.Context) ([]Cluster, error) {
 	var result []Cluster
 	for rows.Next() {
 		var c Cluster
+		var wsID pgtype.Text
 		if err := rows.Scan(
-			&c.ID, &c.WorkspaceID, &c.Name, &c.Namespace, &c.CRName, &c.Phase,
+			&c.ID, &wsID, &c.Name, &c.Namespace, &c.CRName, &c.Phase,
 			&c.ConnectURL, &c.CreatedAt, &c.UpdatedAt,
 		); err != nil {
 			return nil, err
+		}
+		if wsID.Valid {
+			c.WorkspaceID = wsID.String
 		}
 		result = append(result, c)
 	}
@@ -183,12 +203,16 @@ func (s *PgStore) UpdateClusterPhase(ctx context.Context, id string, phase Clust
 		          COALESCE(connect_url, ''), created_at, updated_at`
 
 	var c Cluster
+	var wsID pgtype.Text
 	err := s.pool.QueryRow(ctx, q, id, string(phase), connectURL).Scan(
-		&c.ID, &c.WorkspaceID, &c.Name, &c.Namespace, &c.CRName, &c.Phase,
+		&c.ID, &wsID, &c.Name, &c.Namespace, &c.CRName, &c.Phase,
 		&c.ConnectURL, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
 		return nil, mapPgError(err)
+	}
+	if wsID.Valid {
+		c.WorkspaceID = wsID.String
 	}
 	return &c, nil
 }

@@ -228,6 +228,31 @@ func TestPgStoreIntegration(t *testing.T) {
 	if !errors.Is(err, store.ErrConflict) {
 		t.Errorf("CreateCluster (duplicate cr_name): got %v, want ErrConflict", err)
 	}
+
+	// ====== NULL workspace_id — unscoped cluster ======
+	// CreateCluster with empty WorkspaceID must succeed (NULL bound, not '').
+	pUnscoped := store.CreateClusterParams{
+		WorkspaceID: "", // no workspace — must bind NULL not '' to avoid 22P02
+		Name:        "unscoped-cluster",
+		Namespace:   "spark",
+		CRName:      "sc-unscoped-abc",
+	}
+	clUnscoped, err := st.CreateCluster(ctx, pUnscoped)
+	if err != nil {
+		t.Fatalf("CreateCluster (empty WorkspaceID): %v", err)
+	}
+	if clUnscoped.WorkspaceID != "" {
+		t.Errorf("CreateCluster (empty WorkspaceID): got WorkspaceID=%q, want %q", clUnscoped.WorkspaceID, "")
+	}
+
+	// Round-trip: GetCluster must return WorkspaceID == "".
+	gotUnscoped, err := st.GetCluster(ctx, clUnscoped.ID)
+	if err != nil {
+		t.Fatalf("GetCluster (unscoped): %v", err)
+	}
+	if gotUnscoped.WorkspaceID != "" {
+		t.Errorf("GetCluster (unscoped): WorkspaceID = %q, want %q", gotUnscoped.WorkspaceID, "")
+	}
 }
 
 // replaceDBInDSN swaps the database name in a postgres DSN.

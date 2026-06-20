@@ -196,35 +196,34 @@ CLUSTER_RESPONSE="$(curl --fail-with-body -sS \
   -d '{"name":"e2e"}')"
 
 CLUSTER_ID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"${CLUSTER_RESPONSE}")"
-echo "Cluster created (id=${CLUSTER_ID})."
+CR_NAME="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["cr_name"])' <<<"${CLUSTER_RESPONSE}")"
+echo "Cluster created (id=${CLUSTER_ID}, cr_name=${CR_NAME})."
 
 # ---------------------------------------------------------------------------
 # 7. Wait for the cluster to become Ready.
 #    The API GET /v1/clusters/{id} returns {"status":"ready"} when live.
 #    In parallel, wait on the SparkConnect CR via kubectl.
 # ---------------------------------------------------------------------------
-echo "==> Waiting for cluster '${CLUSTER_ID}' to become Ready (up to 300 s)..."
+echo "==> Waiting for cluster '${CLUSTER_ID}' (CR: ${CR_NAME}) to become Ready (up to 300 s)..."
 
-# OPERATOR CONNECT SERVICE (RECONCILED-AT-LIVE-RUN):
-# Default guess: "<cluster-name>-connect" — adjust CONNECT_SVC_OVERRIDE if
-# the operator uses a different naming convention (e.g. inspect `kubectl get svc -n quicksense`).
-CONNECT_SVC="${CONNECT_SVC_OVERRIDE:-e2e-connect}"
+# The operator creates a Service named "<cr-name>-server" on port 15002.
+CONNECT_SVC="${CONNECT_SVC_OVERRIDE:-${CR_NAME}-server}"
 
 # Wait on the CR if the SparkConnect CRD is installed; fall back to API poll.
 if kubectl get crd sparkconnects.sparkoperator.k8s.io >/dev/null 2>&1; then
   kubectl -n "${API_NS}" wait \
     --for=condition=Ready \
-    "sparkconnect/${CLUSTER_ID}" \
+    "sparkconnect/${CR_NAME}" \
     --timeout=300s || true  # non-fatal; API poll below is the authoritative check
 fi
 
-# API poll: GET /v1/clusters/{id} until status == "ready".
+# API poll: GET /v1/clusters/{id} until ready == true or phase == "Running".
 READY=false
 for _ in $(seq 1 60); do
   STATUS_JSON="$(curl -fsS "${API}/v1/clusters/${CLUSTER_ID}" \
     -H "Authorization: Bearer ${TOKEN}" 2>/dev/null || echo '{}')"
-  CLUSTER_STATUS="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' <<<"${STATUS_JSON}" 2>/dev/null || echo '')"
-  if [[ "${CLUSTER_STATUS}" == "ready" ]]; then
+  IS_READY="$(python3 -c 'import json,sys; d=json.load(sys.stdin); print("true" if d.get("ready") or d.get("phase","")=="Running" else "false")' <<<"${STATUS_JSON}" 2>/dev/null || echo 'false')"
+  if [[ "${IS_READY}" == "true" ]]; then
     READY=true
     break
   fi
@@ -232,7 +231,7 @@ for _ in $(seq 1 60); do
 done
 
 if [[ "${READY}" != "true" ]]; then
-  echo "WARNING: cluster did not reach 'ready' status within timeout; proceeding anyway." >&2
+  echo "WARNING: cluster did not reach Ready state within timeout; proceeding anyway." >&2
 fi
 
 # ---------------------------------------------------------------------------
