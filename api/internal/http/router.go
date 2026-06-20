@@ -10,29 +10,27 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/deepiq/quicksense/api/internal/auth"
+	"github.com/deepiq/quicksense/api/internal/polaris"
 )
 
 // RouterDeps is the dependency-injection bundle passed to NewRouter.
-// Fields are added by later tasks; the zero value (RouterDeps{}) is valid for
-// the /healthz-only skeleton.
 //
-// Fields to be added:
-//   - Verifier auth.TokenVerifier    — B4: Keycloak JWT verifier
-//   - Polaris  polaris.Client        — B7: Polaris REST proxy
+// Fields added by later tasks:
 //   - Store    store.Store           — B5/B6: Postgres store
 //   - K8s      k8s.SparkConnectClient — B10: Spark compute client
 //   - Namespace   string             — SparkConnect namespace
 //   - DefaultExec int32              — default executor count
-type RouterDeps struct{}
+type RouterDeps struct {
+	Verifier auth.TokenVerifier // B4: Keycloak JWT verifier
+	Polaris  polaris.Client     // B7: Polaris REST proxy
+}
 
 // NewRouter builds and returns a configured chi.Mux.
 // It mounts:
 //   - GET /healthz (unauthenticated liveness probe)
-//
-// Later tasks add:
-//   - RequireAuth middleware on the /v1 group (B4)
-//   - Catalog/table routes under /v1 (B8)
-//   - Cluster routes under /v1 (B12/B13)
+//   - /v1 group (RequireAuth + catalog/table routes)
 func NewRouter(deps RouterDeps) *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -40,6 +38,18 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 	r.Use(middleware.Recoverer)
 
 	r.Get("/healthz", healthz)
+
+	r.Route("/v1", func(r chi.Router) {
+		r.Use(auth.RequireAuth(deps.Verifier))
+		ch := &catalogHandler{polaris: deps.Polaris}
+		r.Get("/catalogs", ch.list)
+		r.Post("/catalogs", ch.create)
+		th := &tableHandler{polaris: deps.Polaris}
+		r.Get("/catalogs/{catalog}/namespaces/{namespace}/tables", th.list)
+		r.Post("/catalogs/{catalog}/namespaces/{namespace}/tables", th.create)
+		// ── COMPUTE PLANNER (B12-B13): mount cluster routes here:
+		//   POST/GET /clusters, GET/DELETE /clusters/{id}
+	})
 
 	return r
 }
