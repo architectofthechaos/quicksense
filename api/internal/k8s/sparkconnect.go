@@ -165,8 +165,17 @@ func (c *dynamicClient) Get(ctx context.Context, name string) (ClusterStatus, er
 	return ClusterStatus{
 		Name:  name,
 		Phase: phase,
-		Ready: strings.Contains(strings.ToLower(phase), "ready"),
+		Ready: isReadyState(phase),
 	}, nil
+}
+
+// isReadyState reports whether a SparkConnect .status.state indicates a live,
+// servable cluster. It is lenient about ready-ish state names (e.g. "Ready",
+// "ReadyState") but must NOT match the operator's transient "NotReady"/"Not
+// Ready" states — verified live, the operator emits "NotReady" then "Ready".
+func isReadyState(phase string) bool {
+	normalized := strings.NewReplacer(" ", "", "-", "", "_", "").Replace(strings.ToLower(phase))
+	return strings.Contains(normalized, "ready") && !strings.Contains(normalized, "notready")
 }
 
 // Delete removes the named SparkConnect CR.

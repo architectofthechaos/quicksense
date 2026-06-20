@@ -170,6 +170,43 @@ func TestGetReadsStatusPhase(t *testing.T) {
 	}
 }
 
+// TestGetNotReadyPhaseIsNotReady guards against a substring false-positive:
+// the Kubeflow Spark Operator emits .status.state="NotReady" while a cluster is
+// still settling. A naive strings.Contains(lower,"ready") match treats that as
+// Ready, which defeats the UI's "watch it become Ready" flow. Verified live:
+// the operator reports "NotReady" then "Ready".
+func TestGetNotReadyPhaseIsNotReady(t *testing.T) {
+	ctx := context.Background()
+	fdyn := newFakeDyn()
+	client := k8s.NewSparkConnectClient(fdyn, "quicksense")
+
+	_, err := client.Create(ctx, k8s.ClusterSpec{Name: "sc-notready", Image: "quicksense-spark:dev", Executors: 1})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	obj, err := fdyn.Resource(k8s.SparkConnectGVR).Namespace("quicksense").Get(ctx, "sc-notready", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get from fake: %v", err)
+	}
+	if setErr := unstructured.SetNestedField(obj.Object, "NotReady", "status", "state"); setErr != nil {
+		t.Fatalf("SetNestedField: %v", setErr)
+	}
+	if _, updateErr := fdyn.Resource(k8s.SparkConnectGVR).Namespace("quicksense").Update(ctx, obj, metav1.UpdateOptions{}); updateErr != nil {
+		t.Fatalf("fake Update: %v", updateErr)
+	}
+
+	status, err := client.Get(ctx, "sc-notready")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if status.Phase != "NotReady" {
+		t.Errorf("Phase: got %q, want NotReady", status.Phase)
+	}
+	if status.Ready {
+		t.Errorf("Ready: got true, want false ('NotReady' must not count as ready)")
+	}
+}
+
 func TestDeleteRemovesCR(t *testing.T) {
 	ctx := context.Background()
 	fdyn := newFakeDyn()
