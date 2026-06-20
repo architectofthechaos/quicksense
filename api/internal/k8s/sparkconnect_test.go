@@ -26,13 +26,12 @@ func newFakeDyn() *dynamicfake.FakeDynamicClient {
 func TestCreateProducesCRWithExpectedSpec(t *testing.T) {
 	ctx := context.Background()
 	fdyn := newFakeDyn()
-	client := k8s.NewSparkConnectClient(fdyn, "default")
+	client := k8s.NewSparkConnectClient(fdyn, "quicksense")
 
 	spec := k8s.ClusterSpec{
 		Name:      "demo",
 		Image:     "quicksense-spark:dev",
 		Executors: 2,
-		Namespace: "quicksense",
 	}
 
 	crName, err := client.Create(ctx, spec)
@@ -88,7 +87,6 @@ func TestGetReadsStatusPhase(t *testing.T) {
 		Name:      "sc-status",
 		Image:     "quicksense-spark:dev",
 		Executors: 1,
-		Namespace: "quicksense",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -130,7 +128,6 @@ func TestDeleteRemovesCR(t *testing.T) {
 		Name:      "sc-del",
 		Image:     "quicksense-spark:dev",
 		Executors: 1,
-		Namespace: "quicksense",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)

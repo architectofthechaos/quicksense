@@ -29,11 +29,13 @@ var SparkConnectGVR = schema.GroupVersionResource{
 // Isolated here so B17 can update it in one place.
 var statusStatePath = []string{"status", "state"}
 
-// ClusterSpec describes the desired SparkConnect cluster.
+// ClusterSpec describes the desired SparkConnect cluster. The target namespace
+// is owned by the client (NewSparkConnectClient), not the spec: every CR is
+// created, read, and deleted in that single namespace (the one the operator
+// watches), so Create/Get/Delete stay consistent.
 type ClusterSpec struct {
 	Name      string
 	Image     string
-	Namespace string
 	Executors int32
 }
 
@@ -63,19 +65,10 @@ type dynamicClient struct {
 }
 
 // NewSparkConnectClient returns a SparkConnectClient backed by the given
-// dynamic client. namespace is the default namespace for CRs whose
-// ClusterSpec.Namespace is empty.
+// dynamic client. namespace is authoritative: all CRs are created, read, and
+// deleted in it.
 func NewSparkConnectClient(dyn dynamic.Interface, namespace string) SparkConnectClient {
 	return &dynamicClient{dyn: dyn, namespace: namespace}
-}
-
-// ns resolves the effective namespace: use spec.Namespace when set, else the
-// client's default namespace.
-func (c *dynamicClient) ns(specNS string) string {
-	if specNS != "" {
-		return specNS
-	}
-	return c.namespace
 }
 
 // buildCR constructs the unstructured SparkConnect CR from a ClusterSpec.
@@ -108,9 +101,8 @@ func buildCR(s ClusterSpec, namespace string) *unstructured.Unstructured {
 
 // Create builds and submits a SparkConnect CR, returning the created CR's name.
 func (c *dynamicClient) Create(ctx context.Context, s ClusterSpec) (string, error) {
-	ns := c.ns(s.Namespace)
-	cr := buildCR(s, ns)
-	created, err := c.dyn.Resource(SparkConnectGVR).Namespace(ns).Create(ctx, cr, metav1.CreateOptions{})
+	cr := buildCR(s, c.namespace)
+	created, err := c.dyn.Resource(SparkConnectGVR).Namespace(c.namespace).Create(ctx, cr, metav1.CreateOptions{})
 	if err != nil {
 		return "", err
 	}
