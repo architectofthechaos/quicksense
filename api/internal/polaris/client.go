@@ -36,8 +36,8 @@ type Catalog struct {
 
 // Table is a minimal representation of an Iceberg table identifier.
 type Table struct {
-	Name      string
-	Namespace string
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
 }
 
 // CreateCatalogParams carries the fields needed to create a Polaris catalog
@@ -58,9 +58,9 @@ type CreateCatalogParams struct {
 // the Iceberg REST catalog API.
 type CreateTableParams struct {
 	// Name is the table name.
-	Name string
+	Name string `json:"name"`
 	// Location overrides the default base location (optional).
-	Location string
+	Location string `json:"location,omitempty"`
 }
 
 // APIError is returned by HTTPClient for any non-2xx Polaris response.
