@@ -42,6 +42,7 @@ Use `task ps` for health, `task logs -- polaris` for logs, `task down` to stop c
 | Trino | `http://localhost:8080` | user `quicksense`, no password |
 | Keycloak | `http://localhost:8082` | admin `admin` / `admin` |
 | Keycloak realm | `http://localhost:8082/realms/quicksense` | client `quicksense-api` / `qs-api-secret`, user `qsuser` / `qs-password` |
+| QuickSense API | `kubectl port-forward svc/quicksense-api 8090:8090 -n quicksense` (kind) | Keycloak JWT (see Phase B) |
 
 All defaults are in `.env.example`. `task up` copies it to `.env` if needed. These are development credentials only.
 
@@ -49,11 +50,83 @@ All defaults are in `.env.example`. `task up` copies it to `.env` if needed. The
 
 `task bootstrap` is idempotent. It creates the MinIO bucket `warehouse`, creates the Polaris catalog `quicksense` with base location `s3://warehouse/quicksense`, grants the dev catalog role content privileges, and verifies Keycloak can issue a client-credentials token by printing `KEYCLOAK OK`.
 
-Polaris uses the internal realm `POLARIS` with `root:s3cr3t` for Sprint 1 engine access. Keycloak is wired but not enforced: the `quicksense` realm, `quicksense-api` confidential client, `qsuser` test user, and `polaris_admin` realm role are imported and token issuance is verified, but Polaris external OIDC enforcement is deferred to Sprint 2.
+Polaris uses the internal realm `POLARIS` with `root:s3cr3t` for Sprint 1 engine access. Keycloak is enforced on the QuickSense API: every `/v1/*` request requires a valid Keycloak JWT carrying the `polaris_admin` realm role (Phase B). Polaris is additionally configured with an external OIDC tenant pointing at the `quicksense` realm (see Phase B below); in the dev tier `polaris.authentication.type=internal` is used so the internal `root:s3cr3t` credential keeps working — Polaris 1.5 accepts only `internal` or `external` (no mixed mode).
 
 For local MinIO, the Polaris catalog is created with `stsUnavailable: true`. In Polaris 1.5 this disables storage credential vending, so Spark and Trino use the static MinIO development credentials from `.env` while still authenticating to Polaris over OAuth2 client credentials.
 
 Polaris metadata is stored in Postgres on the named Docker volume `postgres-data`, so the catalog persists across `task down` and `task up`. `task clean` removes volumes and wipes the catalog.
+
+## Phase B — control-plane API, Spark Operator & OIDC
+
+Phase B adds the Go control-plane API (`api/`, module `github.com/deepiq/quicksense/api`),
+the Kubeflow Spark Operator, and Keycloak JWT enforcement.
+
+### QuickSense API
+
+The API is a chi-based HTTP service (`:8080` in-container, exposed as `:8090` by the
+Kubernetes Service) with the following routes:
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/healthz` | No | Liveness probe |
+| GET | `/v1/catalogs` | Yes | List Polaris catalogs |
+| POST | `/v1/catalogs` | Yes | Create a Polaris catalog |
+| GET | `/v1/catalogs/{c}/namespaces/{ns}/tables` | Yes | List Iceberg tables |
+| POST | `/v1/catalogs/{c}/namespaces/{ns}/tables` | Yes | Create an Iceberg table |
+| POST | `/v1/clusters` | Yes | Create a SparkConnect cluster |
+| GET | `/v1/clusters` | Yes | List SparkConnect clusters |
+| GET | `/v1/clusters/{id}` | Yes | Get a SparkConnect cluster |
+| DELETE | `/v1/clusters/{id}` | Yes | Delete a SparkConnect cluster |
+
+All `/v1/*` routes require a valid Keycloak JWT (offline JWKS validation, RS256)
+carrying the `polaris_admin` realm role in `Authorization: Bearer <token>`.
+
+The API proxies catalog operations to Polaris using an internal service credential
+and manages compute lifecycle by creating/deleting `SparkConnect` custom resources
+via the Kubernetes API. It does not run Spark or touch table data directly.
+
+The API maintains its own Postgres database (`QUICKSENSE`, distinct from Polaris's
+`POLARIS`) with `workspaces` and `clusters` tables, applied via golang-migrate on
+startup.
+
+### Spark Operator
+
+The Kubeflow `spark-operator` Helm chart **2.5.1** is installed into the kind cluster:
+
+- Repo: https://kubeflow.github.io/spark-operator
+- Watches the `quicksense` namespace for `SparkConnect` and `SparkApplication` CRs
+- An interactive Spark Connect cluster = one `SparkConnect` CR; the operator brings up
+  a Spark Connect server reachable at `sc://<cluster-name>-server:15002`
+- Uses the same `quicksense-spark` image as Phase A (one image everywhere)
+- Chart and operator image are documented for air-gapped mirroring in
+  `deploy/k8s/spark-operator/NOTES.md`
+
+### Polaris external OIDC
+
+Polaris is configured with an external OIDC tenant (`quarkus.oidc.*`) pointing at the
+Keycloak `quicksense` realm, with a principal-roles mapper (`^polaris_(.*)` →
+`PRINCIPAL_ROLE:$1`) and a bootstrap-created Polaris principal role `admin`.
+
+**Important caveat:** Apache Polaris 1.5's `polaris.authentication.type` is per-realm
+and accepts only `internal` or `external` — there is no `mixed` mode. The dev tier
+uses `internal` so the internal `root:s3cr3t` path (used by the API and bootstrap
+scripts) keeps working. Setting it to `external` enables Polaris to accept Keycloak
+JWTs directly but disables the internal credential. These two modes cannot be active
+simultaneously.
+
+### Phase B task sequence
+
+```sh
+# Full clean-clone sequence
+task kind-up && task operator-install && task kind-bootstrap && task api-build && task api-run && task api-e2e
+```
+
+| Task | Description |
+|------|-------------|
+| `task api-build` | Docker-build the API image and `kind load` it into the cluster |
+| `task api-run` | Apply `deploy/k8s/api.yaml` and wait for rollout |
+| `task operator-install` | Helm-install the Spark Operator (chart 2.5.1) |
+| `task api-e2e` | End-to-end flow: Keycloak token → catalog → cluster → SparkConnect roundtrip → Trino |
 
 ## Build-time downloads
 

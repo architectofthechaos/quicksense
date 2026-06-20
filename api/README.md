@@ -12,14 +12,25 @@ client
   │  Bearer JWT (Keycloak RS256)
   ▼
 chi router (:8080)
-  ├── GET  /healthz          — unauthenticated liveness probe
-  └── /v1  [RequireAuth]
+  ├── GET  /healthz                                                   — unauthenticated liveness probe
+  └── /v1  [RequireAuth — polaris_admin realm role]
        ├── GET  /catalogs
        ├── POST /catalogs
        ├── GET  /catalogs/{catalog}/namespaces/{namespace}/tables
-       └── POST /catalogs/{catalog}/namespaces/{namespace}/tables
-       # NOTE: /v1/clusters routes are added in B12-B14
+       ├── POST /catalogs/{catalog}/namespaces/{namespace}/tables
+       ├── POST /clusters                                             — create SparkConnect CR
+       ├── GET  /clusters                                             — list SparkConnect CRs
+       ├── GET  /clusters/{id}                                        — get SparkConnect CR
+       └── DELETE /clusters/{id}                                      — delete SparkConnect CR
 ```
+
+The API proxies catalog operations to Polaris using its internal service credential.
+Cluster operations create and manage `SparkConnect` custom resources via the Kubernetes
+API; the Kubeflow Spark Operator (chart 2.5.1) reconciles them into Spark Connect
+servers reachable at `sc://<cluster-name>-server:15002`.
+
+The API owns a separate Postgres database (`QUICKSENSE`, distinct from Polaris's `POLARIS`)
+with `workspaces` and `clusters` tables applied via golang-migrate on startup.
 
 ## Environment variables
 
@@ -54,12 +65,17 @@ by Docker Compose, or from a ConfigMap/Secret in kind):
 | POST   | `/v1/catalogs`                                             | Yes  | Create a Polaris catalog   |
 | GET    | `/v1/catalogs/{catalog}/namespaces/{namespace}/tables`     | Yes  | List Iceberg tables        |
 | POST   | `/v1/catalogs/{catalog}/namespaces/{namespace}/tables`     | Yes  | Create an Iceberg table    |
+| POST   | `/v1/clusters`                                             | Yes  | Create a SparkConnect cluster |
+| GET    | `/v1/clusters`                                             | Yes  | List SparkConnect clusters |
+| GET    | `/v1/clusters/{id}`                                        | Yes  | Get a SparkConnect cluster |
+| DELETE | `/v1/clusters/{id}`                                        | Yes  | Delete a SparkConnect cluster |
 
 Routes under `/v1` require a valid Keycloak JWT with the `polaris_admin` realm
-role in the `Authorization: Bearer <token>` header.
+role in the `Authorization: Bearer <token>` header (offline JWKS validation, RS256).
 
-Cluster management routes (`/v1/clusters`) are wired in B12-B14 (Spark Connect
-compute planner).
+An interactive Spark Connect cluster = one `SparkConnect` CR managed by the Kubeflow
+Spark Operator (chart 2.5.1). Once reconciled, the cluster is reachable at
+`sc://<cluster-name>-server:15002`.
 
 ## Running locally
 
@@ -98,11 +114,36 @@ The server logs startup progress and listens on `:8080`.
 
 ### In kind (Kubernetes)
 
-A Deployment manifest is added in B21. Until then use the Docker image:
+Use the Taskfile targets which build and deploy the API into the kind cluster:
 
 ```sh
-docker build -t quicksense-api:dev api/
+# From repo root
+task api-build   # docker build + kind load
+task api-run     # apply deploy/k8s/api.yaml, wait for rollout
 ```
+
+The API is deployed into the `quicksense` namespace as `deploy/k8s/api.yaml` (Deployment
++ Service + ServiceAccount + RBAC for SparkConnect CRs). The Service exposes port 8090.
+To reach the API from your laptop:
+
+```sh
+kubectl port-forward svc/quicksense-api 8090:8090 -n quicksense
+```
+
+Then obtain a Keycloak token and call the API:
+
+```sh
+TOKEN=$(curl -s -X POST \
+  http://localhost:8082/realms/quicksense/protocol/openid-connect/token \
+  -d grant_type=client_credentials \
+  -d client_id=quicksense-api \
+  -d client_secret=qs-api-secret \
+  | jq -r .access_token)
+
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8090/v1/catalogs
+```
+
+The full end-to-end flow is automated by `task api-e2e` (runs `scripts/k8s/api-e2e.sh`).
 
 ## Docker image
 

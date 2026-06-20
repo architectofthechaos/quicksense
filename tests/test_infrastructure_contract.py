@@ -143,7 +143,7 @@ def test_readme_documents_quickstart_ports_credentials_and_oidc_note():
         "localhost:8082",
         "root",
         "s3cr3t",
-        "Keycloak is wired but not enforced",
+        "Keycloak is enforced",
     ]:
         assert needle in readme
 
@@ -582,3 +582,19 @@ def test_api_e2e_and_assets():
         "openid-connect/token",
     ]:
         assert needle in e2e, f"Missing '{needle}' in api-e2e.sh"
+
+
+def test_readme_documents_phase_b():
+    """Root README must document Phase B: API routes, operator, OIDC, and task commands."""
+    readme = read("README.md")
+    for needle in [
+        "task api-e2e",
+        "task operator-install",
+        "spark-operator",
+        "2.5.1",
+        "SparkConnect",
+        "sc://",
+        "OIDC",
+        "/v1/clusters",
+    ]:
+        assert needle in readme, f"Missing '{needle}' in README.md"
