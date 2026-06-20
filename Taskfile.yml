@@ -83,3 +83,9 @@ tasks:
     desc: Stop and delete the kind cluster.
     cmds:
       - kind delete cluster --name quicksense
+
+  operator-install:
+    desc: Install the kubeflow Spark Operator (chart 2.4.0) into the kind cluster.
+    deps: [ensure-env]
+    cmds:
+      - scripts/k8s/operator-install.sh

@@ -407,3 +407,38 @@ def test_keycloak_realm_sslrequired_none():
     """Dev realm sets sslRequired=NONE (spec §4.3) to avoid the HTTPS-required nag."""
     realm = yaml.safe_load(read("docker/keycloak/realm-quicksense.json"))
     assert realm["sslRequired"] == "NONE"
+
+
+# ---------------------------------------------------------------------------
+# Task B16: Spark Operator Helm install assets
+# ---------------------------------------------------------------------------
+
+
+def test_spark_operator_assets_present_and_pinned():
+    """Spark Operator Helm assets exist and contain required pinned values."""
+    # 1. All three files must exist
+    for path in [
+        "deploy/k8s/spark-operator/values.yaml",
+        "deploy/k8s/spark-operator/NOTES.md",
+        "scripts/k8s/operator-install.sh",
+    ]:
+        assert (ROOT / path).is_file(), f"Missing: {path}"
+
+    # 2. NOTES.md must reference the pinned chart version and repo URL
+    notes = read("deploy/k8s/spark-operator/NOTES.md")
+    assert "2.4.0" in notes
+    assert "kubeflow.github.io/spark-operator" in notes
+
+    # 3. Taskfile must expose an operator-install target referencing the script
+    tf = read("Taskfile.yml")
+    assert re.search(r"(?m)^  operator-install:\s*$", tf), "operator-install target missing"
+    assert "scripts/k8s/operator-install.sh" in tf
+
+    # 4. Install script must contain helm, --version, 2.4.0, and success marker
+    script = read("scripts/k8s/operator-install.sh")
+    for needle in ["helm", "--version", "2.4.0", "OPERATOR INSTALL OK"]:
+        assert needle in script, f"Missing '{needle}' in operator-install.sh"
+
+    # 5. values.yaml must name the watched namespace
+    values = read("deploy/k8s/spark-operator/values.yaml")
+    assert "quicksense" in values
