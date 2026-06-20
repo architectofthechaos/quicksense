@@ -12,6 +12,7 @@
 package polaris
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -221,9 +222,9 @@ func (c *HTTPClient) doManagement(ctx context.Context, method, path string, reqB
 	}
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Polaris-Realm", c.realm)
+	req.Header.Set("Accept", "application/json")
 	if reqBody != nil {
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json")
 	}
 
 	resp, err := c.hc.Do(req)
@@ -254,9 +255,9 @@ func (c *HTTPClient) doCatalog(ctx context.Context, method, path string, reqBody
 	}
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Polaris-Realm", c.realm)
+	req.Header.Set("Accept", "application/json")
 	if reqBody != nil {
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json")
 	}
 
 	resp, err := c.hc.Do(req)
@@ -327,7 +328,7 @@ func (c *HTTPClient) CreateCatalog(ctx context.Context, p CreateCatalogParams) (
 		return nil, fmt.Errorf("polaris: marshal create-catalog payload: %w", err)
 	}
 
-	resp, body, err := c.doManagement(ctx, http.MethodPost, "/api/management/v1/catalogs", strings.NewReader(string(b)))
+	resp, body, err := c.doManagement(ctx, http.MethodPost, "/api/management/v1/catalogs", bytes.NewReader(b))
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +418,7 @@ func (c *HTTPClient) CreateTable(ctx context.Context, catalog, namespace string,
 		return nil, fmt.Errorf("polaris: marshal create-table payload: %w", err)
 	}
 
-	resp, body, err := c.doCatalog(ctx, http.MethodPost, path, strings.NewReader(string(b)))
+	resp, body, err := c.doCatalog(ctx, http.MethodPost, path, bytes.NewReader(b))
 	if err != nil {
 		return nil, err
 	}

@@ -355,6 +355,125 @@ func TestHTTPClient_APIError(t *testing.T) {
 	}
 }
 
+// --------------------------------------------------------------------------
+// TestHTTPClient_CreateTable_PayloadShape
+// --------------------------------------------------------------------------
+
+func TestHTTPClient_CreateTable_PayloadShape(t *testing.T) {
+	var capturedReq struct {
+		method string
+		path   string
+		auth   string
+		body   []byte
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/catalog/v1/oauth/tokens":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "tok-create-table",
+				"expires_in":   3600,
+			})
+
+		case "/api/catalog/v1/quicksense/namespaces/demo/tables":
+			capturedReq.method = r.Method
+			capturedReq.path = r.URL.Path
+			capturedReq.auth = r.Header.Get("Authorization")
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "read body", http.StatusInternalServerError)
+				return
+			}
+			capturedReq.body = body
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"metadata-location": "s3://warehouse/quicksense/demo/events/metadata/v1.json",
+				"metadata": map[string]any{
+					"table-uuid": "550e8400-e29b-41d4-a716-446655440000",
+				},
+			})
+
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	ctx := context.Background()
+
+	tbl, err := c.CreateTable(ctx, "quicksense", "demo", polaris.CreateTableParams{
+		Name: "events",
+	})
+	if err != nil {
+		t.Fatalf("CreateTable: %v", err)
+	}
+
+	// Assert METHOD and PATH.
+	if capturedReq.method != http.MethodPost {
+		t.Errorf("method = %q, want POST", capturedReq.method)
+	}
+	wantPath := "/api/catalog/v1/quicksense/namespaces/demo/tables"
+	if capturedReq.path != wantPath {
+		t.Errorf("path = %q, want %q", capturedReq.path, wantPath)
+	}
+
+	// Assert Authorization header.
+	if capturedReq.auth != "Bearer tok-create-table" {
+		t.Errorf("Authorization = %q, want \"Bearer tok-create-table\"", capturedReq.auth)
+	}
+
+	// Assert POST body has expected Iceberg REST create-table shape.
+	var payload struct {
+		Name   string `json:"name"`
+		Schema struct {
+			Type   string `json:"type"`
+			Fields []struct {
+				ID       int    `json:"id"`
+				Name     string `json:"name"`
+				Required bool   `json:"required"`
+				Type     string `json:"type"`
+			} `json:"fields"`
+		} `json:"schema"`
+	}
+	if err := json.Unmarshal(capturedReq.body, &payload); err != nil {
+		t.Fatalf("parse captured body: %v\nbody: %s", err, capturedReq.body)
+	}
+	if payload.Name != "events" {
+		t.Errorf("body.name = %q, want \"events\"", payload.Name)
+	}
+	if payload.Schema.Type != "struct" {
+		t.Errorf("body.schema.type = %q, want \"struct\"", payload.Schema.Type)
+	}
+	if len(payload.Schema.Fields) == 0 {
+		t.Fatalf("body.schema.fields is empty, want at least one field")
+	}
+	f := payload.Schema.Fields[0]
+	if f.Name != "id" {
+		t.Errorf("schema.fields[0].name = %q, want \"id\"", f.Name)
+	}
+	if f.Type != "long" {
+		t.Errorf("schema.fields[0].type = %q, want \"long\"", f.Type)
+	}
+	if !f.Required {
+		t.Errorf("schema.fields[0].required should be true")
+	}
+
+	// Assert returned *Table has expected Name/Namespace.
+	if tbl == nil {
+		t.Fatal("CreateTable returned nil table")
+	}
+	if tbl.Name != "events" {
+		t.Errorf("Table.Name = %q, want \"events\"", tbl.Name)
+	}
+	if tbl.Namespace != "demo" {
+		t.Errorf("Table.Namespace = %q, want \"demo\"", tbl.Namespace)
+	}
+}
+
 // unwrapAPIError extracts *polaris.APIError from err by walking the error chain.
 func unwrapAPIError(err error) (*polaris.APIError, bool) {
 	// Walk the chain manually since we are in the _test package.
