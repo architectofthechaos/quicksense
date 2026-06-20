@@ -11,7 +11,9 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "geist": "1.7.2",
+    "@fontsource-variable/inter": "5.2.8",
+    "@fontsource-variable/jetbrains-mono": "5.2.8",
+    "lucide-react": "1.21.0",
     "next": "15.5.19",
     "next-auth": "5.0.0-beta.25",
     "react": "19.0.0",

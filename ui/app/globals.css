@@ -2,13 +2,101 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * QuickSense design tokens — the single source of truth for color.
+ * Components consume these via Tailwind classes (bg-surface, text-foreground, …)
+ * which map to these variables in tailwind.config.ts. Light is default; .dark on
+ * <html> swaps the palette. (SPEC-003.5 §2)
+ */
 :root {
-  color-scheme: light;
+  --bg: #f6f6fb;
+  --surface: #ffffff;
+  --surface-2: #f1f0f8;
+  --border: #e4e3ee;
+  --text: #15131f;
+  --text-muted: #6b6880;
+  --text-faint: #9d9ab0;
+  --primary: #5a48e0;
+  --primary-strong: #4a37c8;
+  --primary-hover: #3d2bb0;
+  --primary-tint: #ece9fd;
+  --primary-fg: #ffffff;
+  --success: #1f8f4e;
+  --warning: #b5781a;
+  --error: #c0392b;
+  --ring: #5a48e0;
+  --shadow-topbar: 0 1px 2px rgba(20, 19, 31, 0.05);
+  --shadow-card: 0 1px 3px rgba(20, 19, 31, 0.06), 0 1px 2px rgba(20, 19, 31, 0.04);
+  --shadow-pop: 0 10px 30px rgba(20, 19, 31, 0.12), 0 2px 8px rgba(20, 19, 31, 0.08);
 }
+
+.dark {
+  --bg: #0f0e16;
+  --surface: #16141f;
+  --surface-2: #1e1b2a;
+  --border: #2a2740;
+  --text: #ecebf5;
+  --text-muted: #9d9ab0;
+  --text-faint: #6b6880;
+  --primary: #8b7cf8;
+  --primary-strong: #7a6bf5;
+  --primary-hover: #6a5bf0;
+  --primary-tint: #221e38;
+  --primary-fg: #ffffff;
+  --success: #46b36b;
+  --warning: #d69a3a;
+  --error: #e06a5a;
+  --ring: #8b7cf8;
+  --shadow-topbar: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-pop: 0 10px 30px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
 html,
 body {
   height: 100%;
 }
 body {
-  @apply bg-surface-subtle text-slate-800 font-sans antialiased;
+  @apply bg-background text-foreground font-sans antialiased;
+}
+
+@layer components {
+  /* Status badge tints derive from the token via color-mix so they work in both
+     themes without per-mode hardcoding. */
+  .badge {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+  .badge-success {
+    color: var(--success);
+    background: color-mix(in srgb, var(--success) 14%, var(--surface));
+  }
+  .badge-warning {
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 16%, var(--surface));
+  }
+  .badge-error {
+    color: var(--error);
+    background: color-mix(in srgb, var(--error) 14%, var(--surface));
+  }
+  .badge-unknown {
+    @apply text-muted-foreground bg-muted;
+  }
+}
+
+@layer utilities {
+  /* Consistent, intentional focus treatment everywhere (SPEC-003.5 §5). */
+  .focus-ring {
+    @apply outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)];
+  }
+}
+
+/* Respect reduced-motion: disable the provisioning pulse + transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
