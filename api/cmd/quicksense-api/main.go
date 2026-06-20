@@ -103,13 +103,15 @@ func main() {
 
 	// ── 8. Router ─────────────────────────────────────────────────────────────
 	r := httpapi.NewRouter(httpapi.RouterDeps{
-		Verifier:    v,
-		Polaris:     pc,
-		Store:       st,
-		K8s:         scc,
-		Namespace:   cfg.SparkConnectNamespace,
-		DefaultExec: cfg.ClusterDefaultExecutors,
-		SparkImage:  cfg.SparkImage,
+		Verifier:       v,
+		Polaris:        pc,
+		Store:          st,
+		K8s:            scc,
+		Namespace:      cfg.SparkConnectNamespace,
+		DefaultExec:    cfg.ClusterDefaultExecutors,
+		SparkImage:     cfg.SparkImage,
+		ServiceAccount: cfg.SparkServiceAccount,
+		SparkConf:      cfg.CatalogSparkConf(),
 	})
 
 	// ── 9. Serve ──────────────────────────────────────────────────────────────

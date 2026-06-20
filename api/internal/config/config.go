@@ -51,14 +51,48 @@ type Config struct {
 	RequiredRole string
 
 	// Spark / cluster settings.
-	SparkImage             string // QS_SPARK_IMAGE (default: quicksense-spark:latest)
-	SparkConnectNamespace  string // QS_SPARK_NAMESPACE (default: quicksense)
-	ClusterDefaultExecutors int32 // QS_CLUSTER_EXECUTORS (default: 1)
+	SparkImage              string // QS_SPARK_IMAGE (default: quicksense-spark:latest)
+	SparkConnectNamespace   string // QS_SPARK_NAMESPACE (default: quicksense)
+	ClusterDefaultExecutors int32  // QS_CLUSTER_EXECUTORS (default: 1)
+	SparkServiceAccount     string // QS_SPARK_SA (default: spark-operator-spark)
+
+	// MinIO / S3 settings for Iceberg catalog SparkConf.
+	MinioEndpoint  string // MINIO_ENDPOINT (default: http://minio:9000)
+	MinioAccessKey string // MINIO_ROOT_USER (default: minioadmin)
+	MinioSecretKey string // MINIO_ROOT_PASSWORD (default: minioadmin)
+	MinioRegion    string // MINIO_REGION (default: us-east-1)
 
 	// KubeconfigPath is the path to a kubeconfig file.
 	// Empty string means in-cluster config.
 	// Source: KUBECONFIG (default: "").
 	KubeconfigPath string
+}
+
+// CatalogSparkConf returns the Iceberg/Polaris/MinIO catalog SparkConf map
+// required by SparkConnect clusters to read and write the quicksense catalog.
+// Keys and values mirror the validated live CR shape (Spark Operator 2.5.1).
+func (c *Config) CatalogSparkConf() map[string]string {
+	polarisURL := fmt.Sprintf("http://%s:%s/api/catalog", c.PolarisHost, c.PolarisPort)
+	credential := fmt.Sprintf("%s:%s", c.PolarisClientID, c.PolarisClientSecret)
+	cat := c.PolarisCatalog
+	return map[string]string{
+		"spark.sql.extensions":                                          "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
+		"spark.sql.catalog." + cat:                                      "org.apache.iceberg.spark.SparkCatalog",
+		"spark.sql.catalog." + cat + ".catalog-impl":                   "org.apache.iceberg.rest.RESTCatalog",
+		"spark.sql.catalog." + cat + ".uri":                            polarisURL,
+		"spark.sql.catalog." + cat + ".warehouse":                      cat,
+		"spark.sql.catalog." + cat + ".credential":                     credential,
+		"spark.sql.catalog." + cat + ".scope":                          "PRINCIPAL_ROLE:ALL",
+		"spark.sql.catalog." + cat + ".oauth2-server-uri":              polarisURL + "/v1/oauth/tokens",
+		"spark.sql.catalog." + cat + ".header.Polaris-Realm":           c.PolarisRealm,
+		"spark.sql.catalog." + cat + ".io-impl":                        "org.apache.iceberg.aws.s3.S3FileIO",
+		"spark.sql.catalog." + cat + ".s3.endpoint":                    c.MinioEndpoint,
+		"spark.sql.catalog." + cat + ".s3.path-style-access":           "true",
+		"spark.sql.catalog." + cat + ".s3.access-key-id":               c.MinioAccessKey,
+		"spark.sql.catalog." + cat + ".s3.secret-access-key":           c.MinioSecretKey,
+		"spark.sql.catalog." + cat + ".client.region":                  c.MinioRegion,
+		"spark.sql.defaultCatalog":                                      cat,
+	}
 }
 
 // Load reads configuration from os.Getenv.
@@ -123,6 +157,7 @@ func LoadFrom(getenv func(string) string) (*Config, error) {
 	// Spark / cluster settings (all optional with defaults).
 	sparkImage := withDefault("QS_SPARK_IMAGE", "quicksense-spark:latest")
 	sparkNamespace := withDefault("QS_SPARK_NAMESPACE", "quicksense")
+	sparkServiceAccount := withDefault("QS_SPARK_SA", "spark-operator-spark")
 	kubeconfigPath := getenv("KUBECONFIG")
 
 	var clusterDefaultExecutors int32 = 1
@@ -133,6 +168,12 @@ func LoadFrom(getenv func(string) string) (*Config, error) {
 		}
 		// On bad value: keep default (1). Matches "error or default on bad value" spec.
 	}
+
+	// MinIO / S3 settings for Iceberg catalog SparkConf.
+	minioEndpoint := withDefault("MINIO_ENDPOINT", "http://minio:9000")
+	minioAccessKey := withDefault("MINIO_ROOT_USER", "minioadmin")
+	minioSecretKey := withDefault("MINIO_ROOT_PASSWORD", "minioadmin")
+	minioRegion := withDefault("MINIO_REGION", "us-east-1")
 
 	return &Config{
 		PostgresHost:     pgHost,
@@ -161,6 +202,12 @@ func LoadFrom(getenv func(string) string) (*Config, error) {
 		SparkImage:              sparkImage,
 		SparkConnectNamespace:   sparkNamespace,
 		ClusterDefaultExecutors: clusterDefaultExecutors,
+		SparkServiceAccount:     sparkServiceAccount,
 		KubeconfigPath:          kubeconfigPath,
+
+		MinioEndpoint:  minioEndpoint,
+		MinioAccessKey: minioAccessKey,
+		MinioSecretKey: minioSecretKey,
+		MinioRegion:    minioRegion,
 	}, nil
 }

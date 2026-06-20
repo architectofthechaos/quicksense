@@ -34,9 +34,11 @@ var statusStatePath = []string{"status", "state"}
 // created, read, and deleted in that single namespace (the one the operator
 // watches), so Create/Get/Delete stay consistent.
 type ClusterSpec struct {
-	Name      string
-	Image     string
-	Executors int32
+	Name           string
+	Image          string
+	Executors      int32
+	ServiceAccount string            // Kubernetes ServiceAccount for the driver pod
+	SparkConf      map[string]string // Iceberg / catalog sparkConf entries
 }
 
 // ClusterStatus is the observed state of a SparkConnect cluster.
@@ -72,9 +74,41 @@ func NewSparkConnectClient(dyn dynamic.Interface, namespace string) SparkConnect
 }
 
 // buildCR constructs the unstructured SparkConnect CR from a ClusterSpec.
-// Isolated into its own function so B17 can reconcile the spec schema against
-// the installed CRD without touching Create.
+//
+// LIVE-VALIDATED SHAPE (Spark Operator 2.5.1 + kind):
+// The top-level spec.image shortcut leaves pods with imagePullPolicy: Always
+// which causes ImagePullBackOff for kind-loaded images. The full template form
+// is required: spec.server.template.spec and spec.executor.template.spec must
+// each carry their own container entry with imagePullPolicy: IfNotPresent.
+//
+// The operator names the gRPC Service <cr-name>-server on port 15002.
 func buildCR(s ClusterSpec, namespace string) *unstructured.Unstructured {
+	// Build sparkConf as map[string]interface{} for unstructured encoding.
+	sparkConf := make(map[string]interface{}, len(s.SparkConf))
+	for k, v := range s.SparkConf {
+		sparkConf[k] = v
+	}
+
+	// Container entries — one for the driver (server) and one for the executor.
+	driverContainer := map[string]interface{}{
+		"name":            "spark-kubernetes-driver",
+		"image":           s.Image,
+		"imagePullPolicy": "IfNotPresent",
+	}
+	executorContainer := map[string]interface{}{
+		"name":            "spark-kubernetes-executor",
+		"image":           s.Image,
+		"imagePullPolicy": "IfNotPresent",
+	}
+
+	// server spec — serviceAccountName + containers list.
+	serverTemplateSpec := map[string]interface{}{
+		"containers": []interface{}{driverContainer},
+	}
+	if s.ServiceAccount != "" {
+		serverTemplateSpec["serviceAccountName"] = s.ServiceAccount
+	}
+
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": SparkConnectGVR.Group + "/" + SparkConnectGVR.Version,
@@ -86,15 +120,23 @@ func buildCR(s ClusterSpec, namespace string) *unstructured.Unstructured {
 					"app.kubernetes.io/managed-by": "quicksense",
 				},
 			},
-			// Spec shape reconciled against the installed CRD in B17:
-			// sparkVersion (required), top-level image, server (required object),
-			// executor.instances. See `kubectl explain sparkconnect.spec`.
+			// Full template form required for kind-loaded images.
+			// sparkVersion is required by the CRD; sparkConf carries catalog wiring.
 			"spec": map[string]interface{}{
 				"sparkVersion": "4.0.3",
-				"image":        s.Image,
-				"server":       map[string]interface{}{},
+				"sparkConf":    sparkConf,
+				"server": map[string]interface{}{
+					"template": map[string]interface{}{
+						"spec": serverTemplateSpec,
+					},
+				},
 				"executor": map[string]interface{}{
 					"instances": int64(s.Executors),
+					"template": map[string]interface{}{
+						"spec": map[string]interface{}{
+							"containers": []interface{}{executorContainer},
+						},
+					},
 				},
 			},
 		},

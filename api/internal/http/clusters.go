@@ -24,11 +24,13 @@ import (
 // It is a thin control-plane surface: it provisions SparkConnect CRs and
 // records metadata in the store. It never runs Spark or touches table data.
 type clusterHandler struct {
-	store       store.Store
-	k8s         k8s.SparkConnectClient
-	namespace   string
-	defaultExec int32
-	sparkImage  string
+	store          store.Store
+	k8s            k8s.SparkConnectClient
+	namespace      string
+	defaultExec    int32
+	sparkImage     string
+	serviceAccount string            // Kubernetes ServiceAccount for the driver pod
+	sparkConf      map[string]string // Iceberg/catalog SparkConf entries
 }
 
 // nonAlphanumRE matches any character that is not a lowercase letter, digit, or hyphen.
@@ -116,9 +118,11 @@ func (h *clusterHandler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = h.k8s.Create(r.Context(), k8s.ClusterSpec{
-		Name:      crName,
-		Image:     h.sparkImage,
-		Executors: h.defaultExec,
+		Name:           crName,
+		Image:          h.sparkImage,
+		Executors:      h.defaultExec,
+		ServiceAccount: h.serviceAccount,
+		SparkConf:      h.sparkConf,
 	})
 	if err != nil {
 		WriteError(w, http.StatusBadGateway, "provision_error", "failed to provision SparkConnect CR: "+err.Error())

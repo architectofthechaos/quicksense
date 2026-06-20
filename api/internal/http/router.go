@@ -23,9 +23,11 @@ type RouterDeps struct {
 	Polaris  polaris.Client         // B7: Polaris REST proxy
 	Store    store.Store            // B9: Postgres store
 	K8s      k8s.SparkConnectClient // B12: Spark compute client
-	Namespace   string              // SparkConnect target namespace
-	DefaultExec int32               // default executor count per cluster
-	SparkImage  string              // Spark container image
+	Namespace      string            // SparkConnect target namespace
+	DefaultExec    int32             // default executor count per cluster
+	SparkImage     string            // Spark container image
+	ServiceAccount string            // Kubernetes ServiceAccount for driver pods
+	SparkConf      map[string]string // Iceberg/catalog SparkConf entries
 }
 
 // NewRouter builds and returns a configured chi.Mux.
@@ -49,11 +51,13 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 		r.Get("/catalogs/{catalog}/namespaces/{namespace}/tables", th.list)
 		r.Post("/catalogs/{catalog}/namespaces/{namespace}/tables", th.create)
 		clh := &clusterHandler{
-			store:       deps.Store,
-			k8s:         deps.K8s,
-			namespace:   deps.Namespace,
-			defaultExec: deps.DefaultExec,
-			sparkImage:  deps.SparkImage,
+			store:          deps.Store,
+			k8s:            deps.K8s,
+			namespace:      deps.Namespace,
+			defaultExec:    deps.DefaultExec,
+			sparkImage:     deps.SparkImage,
+			serviceAccount: deps.ServiceAccount,
+			sparkConf:      deps.SparkConf,
 		}
 		r.Post("/clusters", clh.create)
 		r.Get("/clusters", clh.list)

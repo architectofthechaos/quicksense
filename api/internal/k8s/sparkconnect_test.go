@@ -29,9 +29,14 @@ func TestCreateProducesCRWithExpectedSpec(t *testing.T) {
 	client := k8s.NewSparkConnectClient(fdyn, "quicksense")
 
 	spec := k8s.ClusterSpec{
-		Name:      "demo",
-		Image:     "quicksense-spark:dev",
-		Executors: 2,
+		Name:           "demo",
+		Image:          "quicksense-spark:dev",
+		Executors:      2,
+		ServiceAccount: "spark-operator-spark",
+		SparkConf: map[string]string{
+			"spark.sql.defaultCatalog": "quicksense",
+			"spark.sql.extensions":    "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
+		},
 	}
 
 	crName, err := client.Create(ctx, spec)
@@ -58,18 +63,36 @@ func TestCreateProducesCRWithExpectedSpec(t *testing.T) {
 	if kk != "SparkConnect" {
 		t.Errorf("kind: got %q, want SparkConnect", kk)
 	}
-	// spec.image (top-level, per the SparkConnect CRD)
-	img, found, err2 := unstructured.NestedString(got.Object, "spec", "image")
-	if err2 != nil || !found {
-		t.Fatalf("spec.image missing or error: found=%v err=%v", found, err2)
+
+	// spec.image must NOT exist at top-level (live validation: top-level image
+	// leaves pods with imagePullPolicy: Always which causes ImagePullBackOff).
+	if _, found, _ := unstructured.NestedString(got.Object, "spec", "image"); found {
+		t.Errorf("spec.image must be absent from top-level (use template containers instead)")
 	}
-	if img != "quicksense-spark:dev" {
-		t.Errorf("spec.image: got %q, want quicksense-spark:dev", img)
+
+	// spec.server.template.spec.containers — driver container (use NestedSlice;
+	// integer-keyed NestedString does not work for slice elements in unstructured).
+	serverContainers, found, _ := unstructured.NestedSlice(got.Object, "spec", "server", "template", "spec", "containers")
+	if !found || len(serverContainers) == 0 {
+		t.Fatalf("spec.server.template.spec.containers missing or empty")
 	}
-	// spec.server is a required object on the CRD
-	if _, found, _ := unstructured.NestedMap(got.Object, "spec", "server"); !found {
-		t.Errorf("spec.server missing (required by the SparkConnect CRD)")
+	sc0, ok := serverContainers[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("server containers[0] is not a map: %T", serverContainers[0])
 	}
+	if sc0["image"] != "quicksense-spark:dev" {
+		t.Errorf("server container image: got %v, want quicksense-spark:dev", sc0["image"])
+	}
+	if sc0["imagePullPolicy"] != "IfNotPresent" {
+		t.Errorf("server container imagePullPolicy: got %v, want IfNotPresent", sc0["imagePullPolicy"])
+	}
+
+	// spec.server.template.spec.serviceAccountName
+	sa, _, _ := unstructured.NestedString(got.Object, "spec", "server", "template", "spec", "serviceAccountName")
+	if sa != "spark-operator-spark" {
+		t.Errorf("serviceAccountName: got %q, want spark-operator-spark", sa)
+	}
+
 	// spec.executor.instances
 	inst, found, err3 := unstructured.NestedInt64(got.Object, "spec", "executor", "instances")
 	if err3 != nil || !found {
@@ -77,6 +100,30 @@ func TestCreateProducesCRWithExpectedSpec(t *testing.T) {
 	}
 	if inst != 2 {
 		t.Errorf("spec.executor.instances: got %d, want 2", inst)
+	}
+
+	// spec.executor.template.spec.containers — executor container
+	execContainers, found, _ := unstructured.NestedSlice(got.Object, "spec", "executor", "template", "spec", "containers")
+	if !found || len(execContainers) == 0 {
+		t.Fatalf("spec.executor.template.spec.containers missing or empty")
+	}
+	ec0, ok := execContainers[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("executor containers[0] is not a map: %T", execContainers[0])
+	}
+	if ec0["image"] != "quicksense-spark:dev" {
+		t.Errorf("executor container image: got %v, want quicksense-spark:dev", ec0["image"])
+	}
+	if ec0["imagePullPolicy"] != "IfNotPresent" {
+		t.Errorf("executor container imagePullPolicy: got %v, want IfNotPresent", ec0["imagePullPolicy"])
+	}
+
+	// spec.sparkConf["spark.sql.defaultCatalog"] must equal "quicksense"
+	defaultCatalog, found, _ := unstructured.NestedString(got.Object, "spec", "sparkConf", "spark.sql.defaultCatalog")
+	if !found {
+		t.Errorf("spec.sparkConf[spark.sql.defaultCatalog] missing")
+	} else if defaultCatalog != "quicksense" {
+		t.Errorf("spark.sql.defaultCatalog: got %q, want quicksense", defaultCatalog)
 	}
 }
 

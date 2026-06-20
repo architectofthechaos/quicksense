@@ -136,6 +136,69 @@ func TestLoadFrom_MissingRequired(t *testing.T) {
 	}
 }
 
+func TestCatalogSparkConf(t *testing.T) {
+	cfg, err := config.LoadFrom(fakeEnv(fullEnv))
+	if err != nil {
+		t.Fatalf("LoadFrom error: %v", err)
+	}
+	sc := cfg.CatalogSparkConf()
+
+	// defaultCatalog must equal PolarisCatalog (quicksense).
+	if got := sc["spark.sql.defaultCatalog"]; got != "quicksense" {
+		t.Errorf("spark.sql.defaultCatalog = %q; want quicksense", got)
+	}
+	// Catalog URI must encode PolarisHost:PolarisPort.
+	wantURI := "http://polaris:8181/api/catalog"
+	if got := sc["spark.sql.catalog.quicksense.uri"]; got != wantURI {
+		t.Errorf("catalog uri = %q; want %q", got, wantURI)
+	}
+	// Credential must encode ClientID:ClientSecret.
+	wantCred := "root:s3cr3t"
+	if got := sc["spark.sql.catalog.quicksense.credential"]; got != wantCred {
+		t.Errorf("credential = %q; want %q", got, wantCred)
+	}
+	// Polaris-Realm header must equal PolarisRealm.
+	if got := sc["spark.sql.catalog.quicksense.header.Polaris-Realm"]; got != "POLARIS" {
+		t.Errorf("Polaris-Realm header = %q; want POLARIS", got)
+	}
+	// MinIO S3 endpoint must use the default.
+	if got := sc["spark.sql.catalog.quicksense.s3.endpoint"]; got != "http://minio:9000" {
+		t.Errorf("s3.endpoint = %q; want http://minio:9000", got)
+	}
+	// oauth2-server-uri must append /v1/oauth/tokens.
+	wantOAuth := "http://polaris:8181/api/catalog/v1/oauth/tokens"
+	if got := sc["spark.sql.catalog.quicksense.oauth2-server-uri"]; got != wantOAuth {
+		t.Errorf("oauth2-server-uri = %q; want %q", got, wantOAuth)
+	}
+}
+
+func TestCatalogSparkConf_MinioOverride(t *testing.T) {
+	env := make(map[string]string)
+	for k, v := range fullEnv {
+		env[k] = v
+	}
+	env["MINIO_ENDPOINT"] = "http://minio.internal:9000"
+	env["MINIO_ROOT_USER"] = "myaccess"
+	env["MINIO_ROOT_PASSWORD"] = "mysecret"
+	env["MINIO_REGION"] = "eu-west-1"
+
+	cfg, err := config.LoadFrom(fakeEnv(env))
+	if err != nil {
+		t.Fatalf("LoadFrom error: %v", err)
+	}
+	sc := cfg.CatalogSparkConf()
+
+	if got := sc["spark.sql.catalog.quicksense.s3.endpoint"]; got != "http://minio.internal:9000" {
+		t.Errorf("s3.endpoint = %q; want http://minio.internal:9000", got)
+	}
+	if got := sc["spark.sql.catalog.quicksense.s3.access-key-id"]; got != "myaccess" {
+		t.Errorf("access-key-id = %q; want myaccess", got)
+	}
+	if got := sc["spark.sql.catalog.quicksense.client.region"]; got != "eu-west-1" {
+		t.Errorf("client.region = %q; want eu-west-1", got)
+	}
+}
+
 func TestConfigParsesSparkFields(t *testing.T) {
 	t.Run("explicit values", func(t *testing.T) {
 		env := make(map[string]string)
