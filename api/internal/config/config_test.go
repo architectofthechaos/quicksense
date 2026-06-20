@@ -135,3 +135,50 @@ func TestLoadFrom_MissingRequired(t *testing.T) {
 		t.Fatal("expected error for missing required vars, got nil")
 	}
 }
+
+func TestConfigParsesSparkFields(t *testing.T) {
+	t.Run("explicit values", func(t *testing.T) {
+		env := make(map[string]string)
+		for k, v := range fullEnv {
+			env[k] = v
+		}
+		env["QS_SPARK_IMAGE"] = "quicksense-spark:dev"
+		env["QS_SPARK_NAMESPACE"] = "quicksense"
+		env["QS_CLUSTER_EXECUTORS"] = "3"
+
+		cfg, err := config.LoadFrom(fakeEnv(env))
+		if err != nil {
+			t.Fatalf("LoadFrom error: %v", err)
+		}
+
+		if cfg.SparkImage != "quicksense-spark:dev" {
+			t.Errorf("SparkImage = %q; want %q", cfg.SparkImage, "quicksense-spark:dev")
+		}
+		if cfg.SparkConnectNamespace != "quicksense" {
+			t.Errorf("SparkConnectNamespace = %q; want %q", cfg.SparkConnectNamespace, "quicksense")
+		}
+		if cfg.ClusterDefaultExecutors != 3 {
+			t.Errorf("ClusterDefaultExecutors = %d; want %d", cfg.ClusterDefaultExecutors, 3)
+		}
+	})
+
+	t.Run("defaults when unset", func(t *testing.T) {
+		cfg, err := config.LoadFrom(fakeEnv(fullEnv))
+		if err != nil {
+			t.Fatalf("LoadFrom error: %v", err)
+		}
+
+		if cfg.SparkImage != "quicksense-spark:latest" {
+			t.Errorf("SparkImage default = %q; want %q", cfg.SparkImage, "quicksense-spark:latest")
+		}
+		if cfg.SparkConnectNamespace != "quicksense" {
+			t.Errorf("SparkConnectNamespace default = %q; want %q", cfg.SparkConnectNamespace, "quicksense")
+		}
+		if cfg.ClusterDefaultExecutors != 1 {
+			t.Errorf("ClusterDefaultExecutors default = %d; want %d", cfg.ClusterDefaultExecutors, 1)
+		}
+		if cfg.KubeconfigPath != "" {
+			t.Errorf("KubeconfigPath default = %q; want %q", cfg.KubeconfigPath, "")
+		}
+	})
+}

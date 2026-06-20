@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 )
 
 // Config is the fully-resolved runtime configuration.
@@ -48,6 +49,16 @@ type Config struct {
 	// RequiredRole is the Keycloak role checked on every authenticated request.
 	// Default: "polaris_admin".
 	RequiredRole string
+
+	// Spark / cluster settings.
+	SparkImage             string // QS_SPARK_IMAGE (default: quicksense-spark:latest)
+	SparkConnectNamespace  string // QS_SPARK_NAMESPACE (default: quicksense)
+	ClusterDefaultExecutors int32 // QS_CLUSTER_EXECUTORS (default: 1)
+
+	// KubeconfigPath is the path to a kubeconfig file.
+	// Empty string means in-cluster config.
+	// Source: KUBECONFIG (default: "").
+	KubeconfigPath string
 }
 
 // Load reads configuration from os.Getenv.
@@ -109,6 +120,20 @@ func LoadFrom(getenv func(string) string) (*Config, error) {
 
 	requiredRole := withDefault("REQUIRED_ROLE", "polaris_admin")
 
+	// Spark / cluster settings (all optional with defaults).
+	sparkImage := withDefault("QS_SPARK_IMAGE", "quicksense-spark:latest")
+	sparkNamespace := withDefault("QS_SPARK_NAMESPACE", "quicksense")
+	kubeconfigPath := getenv("KUBECONFIG")
+
+	var clusterDefaultExecutors int32 = 1
+	if raw := getenv("QS_CLUSTER_EXECUTORS"); raw != "" {
+		n, err := strconv.ParseInt(raw, 10, 32)
+		if err == nil {
+			clusterDefaultExecutors = int32(n)
+		}
+		// On bad value: keep default (1). Matches "error or default on bad value" spec.
+	}
+
 	return &Config{
 		PostgresHost:     pgHost,
 		PostgresUser:     pgUser,
@@ -132,5 +157,10 @@ func LoadFrom(getenv func(string) string) (*Config, error) {
 		KeycloakJWKSURL:      jwksURL,
 
 		RequiredRole: requiredRole,
+
+		SparkImage:              sparkImage,
+		SparkConnectNamespace:   sparkNamespace,
+		ClusterDefaultExecutors: clusterDefaultExecutors,
+		KubeconfigPath:          kubeconfigPath,
 	}, nil
 }

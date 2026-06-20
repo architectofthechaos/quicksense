@@ -26,6 +26,7 @@ import (
 	"github.com/deepiq/quicksense/api/internal/auth"
 	"github.com/deepiq/quicksense/api/internal/config"
 	httpapi "github.com/deepiq/quicksense/api/internal/http"
+	"github.com/deepiq/quicksense/api/internal/k8s"
 	"github.com/deepiq/quicksense/api/internal/polaris"
 	"github.com/deepiq/quicksense/api/internal/store"
 )
@@ -91,14 +92,27 @@ func main() {
 	}
 	log.Printf("quicksense-api: keycloak verifier ready (issuer=%s, role=%s)", issuer, cfg.RequiredRole)
 
-	// ── 7. Router ─────────────────────────────────────────────────────────────
+	// ── 7. k8s dynamic client + SparkConnect client ───────────────────────────
+	dyn, err := k8s.NewDynamicClient(cfg.KubeconfigPath)
+	if err != nil {
+		log.Fatalf("quicksense-api: k8s client: %v", err)
+	}
+	scc := k8s.NewSparkConnectClient(dyn, cfg.SparkConnectNamespace)
+	log.Printf("quicksense-api: k8s SparkConnect client ready (namespace=%s, image=%s, executors=%d)",
+		cfg.SparkConnectNamespace, cfg.SparkImage, cfg.ClusterDefaultExecutors)
+
+	// ── 8. Router ─────────────────────────────────────────────────────────────
 	r := httpapi.NewRouter(httpapi.RouterDeps{
-		Verifier: v,
-		Polaris:  pc,
-		Store:    st,
+		Verifier:    v,
+		Polaris:     pc,
+		Store:       st,
+		K8s:         scc,
+		Namespace:   cfg.SparkConnectNamespace,
+		DefaultExec: cfg.ClusterDefaultExecutors,
+		SparkImage:  cfg.SparkImage,
 	})
 
-	// ── 8. Serve ──────────────────────────────────────────────────────────────
+	// ── 9. Serve ──────────────────────────────────────────────────────────────
 	srv := &http.Server{
 		Addr:         ":8080",
 		Handler:      r,
