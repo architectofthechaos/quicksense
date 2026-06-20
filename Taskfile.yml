@@ -122,3 +122,37 @@ tasks:
     deps: [ensure-env]
     cmds:
       - scripts/k8s/api-e2e.sh
+
+  ui-install:
+    desc: Install the web UI dependencies.
+    dir: ui
+    cmds:
+      - npm install
+
+  ui-dev:
+    desc: Run the Next.js UI dev server on http://localhost:3000.
+    dir: ui
+    cmds:
+      - test -f .env.local || (echo "Create ui/.env.local from ui/.env.local.example (set AUTH_SECRET)" && exit 1)
+      - npm run dev
+
+  ui-build:
+    desc: Production build of the UI (lint + typecheck + next build).
+    dir: ui
+    cmds:
+      - npm run lint
+      - npm run typecheck
+      - npm run build
+
+  ui-lint:
+    desc: Lint + typecheck the UI.
+    dir: ui
+    cmds:
+      - npm run lint
+      - npm run typecheck
+
+  ui-test:
+    desc: Run the UI unit/component tests.
+    dir: ui
+    cmds:
+      - npm test
