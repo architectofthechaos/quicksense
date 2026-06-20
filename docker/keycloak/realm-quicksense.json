@@ -65,8 +65,10 @@
       "username": "qsuser",
       "enabled": true,
       "emailVerified": true,
+      "email": "qsuser@quicksense.local",
       "firstName": "QuickSense",
       "lastName": "User",
+      "requiredActions": [],
       "credentials": [
         {
           "type": "password",
