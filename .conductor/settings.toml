@@ -1,0 +1,40 @@
+#:schema https://conductor.build/schemas/settings.repo.schema.json
+
+# Shared Conductor configuration for QuickSense.
+#
+# QuickSense is a Task-orchestrated local lakehouse stack (Taskfile.yml):
+#   - dev tier   : Docker Compose (Polaris, MinIO, Spark, Trino, Keycloak, Postgres)
+#   - K8s tier   : kind (cluster name "quicksense")
+#   - control plane: a Go API under api/
+# There is no JS/Node package manager; `task` + `docker` + `go` are the tools
+# (see README.md "60-second quickstart").
+
+# Copy the gitignored runtime .env into each new workspace when the repo root
+# has one. The setup script falls back to creating it from the committed
+# .env.example when it is absent, so a workspace always has dev config.
+file_include_globs = ".env"
+
+[scripts]
+# Runs after a workspace is created. Guarantees a .env (dev defaults live in the
+# committed .env.example) and warms the Go module cache when a Go toolchain is
+# present. Non-interactive, non-destructive, and safe when `go` is not installed.
+setup = "test -f .env || cp .env.example .env; command -v go >/dev/null 2>&1 && (cd api && go mod download) || true"
+
+# The Run button brings up the dev-mode stack (the documented dev tier).
+# Follow-on commands a developer runs in the terminal: `task bootstrap`,
+# `task roundtrip` (or `task test` for up+bootstrap+roundtrip); the Kubernetes
+# tier is `task kind-up && task kind-bootstrap && task kind-roundtrip`.
+run = "task up"
+
+# Only one workspace can run the stack at a time: it binds fixed host ports
+# (8181/9000/9001/4040/8080/8082), a fixed Docker Compose project name
+# (quicksense), and a single kind cluster named "quicksense" — shared resources
+# that two workspaces cannot hold simultaneously. (The stack uses fixed ports
+# its engine configs + round-trip/bootstrap scripts assume, so CONDUCTOR_PORT
+# is intentionally not used.)
+run_mode = "nonconcurrent"
+
+# Runs before a workspace is archived. Tears down this workspace's stack so it
+# frees ports/volumes for the next run: remove Compose containers + volumes and
+# delete the kind cluster if one was created. Each step is non-failing.
+archive = "task clean || true; task kind-down || true"
