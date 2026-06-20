@@ -1,14 +1,20 @@
 import type { ButtonHTMLAttributes } from "react";
 
-type Variant = "primary" | "ghost" | "danger";
+type Variant = "primary" | "secondary" | "destructive" | "ghost";
 
 const BASE =
-  "inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-1 disabled:opacity-50 disabled:pointer-events-none";
+  "focus-ring inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors duration-150 disabled:opacity-50 disabled:pointer-events-none";
 
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-accent text-accent-fg shadow-sm hover:bg-teal-700 active:bg-teal-800",
-  ghost: "bg-white text-slate-700 border border-surface-border hover:bg-surface-subtle hover:text-slate-900",
-  danger: "bg-white text-rose-600 border border-rose-200 hover:bg-rose-50 hover:border-rose-300",
+  // CTA — solid brand indigo.
+  primary: "bg-primary-strong text-primary-fg hover:bg-primary-hover",
+  // Low-emphasis neutral outline.
+  secondary: "border border-border bg-surface text-foreground hover:bg-muted",
+  // Neutral outline that resolves to destructive on hover.
+  destructive:
+    "border border-border bg-surface text-foreground hover:border-error hover:text-error hover:bg-[color-mix(in_srgb,var(--error)_10%,var(--surface))]",
+  // Minimal — for inline actions like Connect/Copy.
+  ghost: "text-muted-foreground hover:bg-muted hover:text-foreground",
 };
 
 export function Button({

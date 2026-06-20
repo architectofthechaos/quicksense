@@ -8,7 +8,7 @@ import { AppShell } from "@/components/AppShell";
 // also resolves the username for the shell.
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const session = await auth();
-  if (!session?.user) redirect("/api/auth/signin");
+  if (!session?.user) redirect("/login");
   const username = session.user.name ?? "user";
   return <AppShell username={username}>{children}</AppShell>;
 }

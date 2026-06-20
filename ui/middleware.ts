@@ -6,7 +6,7 @@ import { isProtectedPath } from "@/lib/route-guard";
 // originally-requested URL as callbackUrl.
 export default auth((req) => {
   if (isProtectedPath(req.nextUrl.pathname) && !req.auth) {
-    const url = new URL("/api/auth/signin", req.nextUrl.origin);
+    const url = new URL("/login", req.nextUrl.origin);
     url.searchParams.set("callbackUrl", req.nextUrl.href);
     return Response.redirect(url);
   }

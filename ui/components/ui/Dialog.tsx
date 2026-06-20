@@ -2,7 +2,7 @@
 import { useEffect, type ReactNode } from "react";
 
 // Accessible modal: role=dialog, Escape + backdrop click close, content click
-// is swallowed. A short scale/fade entrance keeps it feeling crafted.
+// swallowed. Scrim fades in; card uses the elevated pop shadow. (SPEC-003.5 §4.4)
 export function Dialog({
   open,
   onClose,
@@ -27,17 +27,17 @@ export function Dialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]"
+      className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-full max-w-md rounded-xl border border-surface-border bg-surface p-6 shadow-2xl shadow-slate-900/10"
+        className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-pop"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-1 text-lg font-semibold tracking-tight text-slate-900">{title}</h2>
+        <h2 className="text-base font-semibold tracking-tight text-foreground">{title}</h2>
         {children}
       </div>
     </div>

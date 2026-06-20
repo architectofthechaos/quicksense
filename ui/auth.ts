@@ -11,6 +11,7 @@ export const authConfig: NextAuthConfig = {
     }),
   ],
   session: { strategy: "jwt" },
+  pages: { signIn: "/login" },
   callbacks: {
     jwt: jwtCallback,
     session: sessionCallback,

@@ -1,73 +1,69 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Boxes, Database, Workflow, SquareTerminal, NotebookPen, Bot, Lock, type LucideIcon } from "lucide-react";
+import { ConnectionStatus } from "@/components/ConnectionStatus";
 
-const ITEMS = [
-  { key: "clusters", label: "Clusters", href: "/app/clusters" },
-  { key: "catalog", label: "Catalog", href: "/app/catalog" },
-] as const;
+type Item = { key: string; label: string; href: string; icon: LucideIcon };
 
-const FUTURE = ["Jobs", "SQL editor", "Notebooks", "Agents"];
+const ITEMS: Item[] = [
+  { key: "clusters", label: "Clusters", href: "/app/clusters", icon: Boxes },
+  { key: "catalog", label: "Catalog", href: "/app/catalog", icon: Database },
+];
+
+const FUTURE: { label: string; icon: LucideIcon }[] = [
+  { label: "Jobs", icon: Workflow },
+  { label: "SQL editor", icon: SquareTerminal },
+  { label: "Notebooks", icon: NotebookPen },
+  { label: "Agents", icon: Bot },
+];
 
 export function NavSidebar() {
   const pathname = usePathname() ?? "";
   return (
-    <nav className="flex w-60 shrink-0 flex-col border-r border-surface-border bg-surface">
-      {/* Brand */}
-      <div className="flex h-14 items-center gap-2.5 border-b border-surface-border px-5">
-        <span
-          className="flex h-7 w-7 items-center justify-center rounded-md bg-accent font-mono text-sm font-bold text-accent-fg shadow-sm"
-          aria-hidden
-        >
-          Q
-        </span>
-        <span className="text-[15px] font-semibold tracking-tight text-slate-900">QuickSense</span>
-      </div>
-
-      {/* Primary nav */}
+    <nav className="flex w-60 shrink-0 flex-col border-r border-border bg-surface">
       <div className="flex flex-col gap-0.5 p-3">
-        {ITEMS.map((it) => {
-          const isActive = pathname === it.href || pathname.startsWith(it.href + "/");
+        {ITEMS.map(({ key, label, href, icon: Icon }) => {
+          const active = pathname === href || pathname.startsWith(href + "/");
           return (
             <Link
-              key={it.key}
-              href={it.href}
-              aria-current={isActive ? "page" : undefined}
-              className={`group flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                isActive
-                  ? "bg-accent-muted text-teal-800"
-                  : "text-slate-600 hover:bg-surface-subtle hover:text-slate-900"
+              key={key}
+              href={href}
+              aria-current={active ? "page" : undefined}
+              className={`focus-ring flex items-center gap-2.5 rounded-lg py-2 pr-3 text-sm transition-colors ${
+                active
+                  ? "border-l-[3px] border-primary bg-primary-tint pl-[9px] font-semibold text-primary"
+                  : "border-l-[3px] border-transparent pl-[9px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
               }`}
             >
-              <span
-                className={`h-1.5 w-1.5 rounded-full transition-colors ${
-                  isActive ? "bg-accent" : "bg-slate-300 group-hover:bg-slate-400"
-                }`}
-                aria-hidden
-              />
-              {it.label}
+              <Icon className="h-[18px] w-[18px]" strokeWidth={active ? 2.25 : 2} />
+              {label}
             </Link>
           );
         })}
       </div>
 
-      {/* Future sections — visible but inert this sprint */}
-      <div className="mt-2 px-3">
-        <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+      <div className="mt-1 px-3">
+        <div className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-faint">
           Coming soon
         </div>
-        {FUTURE.map((f) => (
-          <span
-            key={f}
-            className="flex cursor-default items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-300"
+        {FUTURE.map(({ label, icon: Icon }) => (
+          <div
+            key={label}
+            title="Coming soon"
+            aria-disabled="true"
+            className="flex cursor-not-allowed items-center gap-2.5 rounded-lg py-2 pl-3 pr-3 text-sm font-medium text-faint"
           >
-            <span className="h-1.5 w-1.5 rounded-full bg-slate-200" aria-hidden />
-            {f}
-          </span>
+            <Icon className="h-[18px] w-[18px]" strokeWidth={2} />
+            {label}
+            <Lock className="ml-auto h-3.5 w-3.5" />
+          </div>
         ))}
       </div>
 
-      <div className="mt-auto p-4 text-[11px] text-slate-400">Sprint 3 · control plane</div>
+      <div className="mt-auto border-t border-border p-2">
+        <ConnectionStatus />
+      </div>
     </nav>
   );
 }

@@ -32,3 +32,9 @@ export function phaseToBadge(c: Pick<Cluster, "phase" | "ready">): { kind: Badge
 export function isTerminalReady(c: Pick<Cluster, "phase" | "ready">): boolean {
   return c.ready || c.phase === "Running";
 }
+
+// connectUrl builds the Spark Connect endpoint for a cluster. The Spark Operator
+// names the gRPC Service "<cr-name>-server" on port 15002 (verified live).
+export function connectUrl(crName: string): string {
+  return `sc://${crName}-server:15002`;
+}

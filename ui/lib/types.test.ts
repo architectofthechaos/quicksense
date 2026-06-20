@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { phaseToBadge, isTerminalReady } from "@/lib/types";
+import { phaseToBadge, isTerminalReady, connectUrl } from "@/lib/types";
 
 describe("phaseToBadge", () => {
   it("ready flag wins regardless of phase string", () => {
@@ -32,5 +32,11 @@ describe("isTerminalReady", () => {
   });
   it("is false otherwise", () => {
     expect(isTerminalReady({ phase: "Provisioning", ready: false })).toBe(false);
+  });
+});
+
+describe("connectUrl", () => {
+  it("builds the Spark Connect URL from the CR name (operator names the svc <cr>-server:15002)", () => {
+    expect(connectUrl("qs-demo-ab12cd34")).toBe("sc://qs-demo-ab12cd34-server:15002");
   });
 });
