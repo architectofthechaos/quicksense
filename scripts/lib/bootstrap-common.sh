@@ -152,6 +152,71 @@ PY
   esac
 }
 
+ensure_polaris_admin_principal_role() {
+  local token="$1"
+  local mgmt_base="http://localhost:${POLARIS_PORT:-8181}/api/management/v1"
+  local catalog="${POLARIS_CATALOG:-quicksense}"
+  local role_name="admin"
+  local pr_status
+  local pr_file="/tmp/quicksense-polaris-principal-role.json"
+
+  # Check whether the principal role already exists.
+  pr_status="$(curl -s -o "${pr_file}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${token}" \
+    -H "Polaris-Realm: ${POLARIS_REALM:-POLARIS}" \
+    "${mgmt_base}/principal-roles/${role_name}")"
+
+  if [[ "${pr_status}" == "404" ]]; then
+    # Create the principal role.
+    pr_status="$(curl -s -o "${pr_file}" -w "%{http_code}" \
+      -H "Authorization: Bearer ${token}" \
+      -H "Polaris-Realm: ${POLARIS_REALM:-POLARIS}" \
+      -H "Content-Type: application/json" \
+      -X POST \
+      "${mgmt_base}/principal-roles" \
+      -d "{\"principalRole\":{\"name\":\"${role_name}\"}}")"
+
+    case "${pr_status}" in
+      200|201|409)
+        echo "Created Polaris principal role ${role_name}"
+        ;;
+      *)
+        echo "Unexpected Polaris principal-roles create status ${pr_status}" >&2
+        cat "${pr_file}" >&2 || true
+        return 1
+        ;;
+    esac
+  elif [[ "${pr_status}" == "200" ]]; then
+    echo "Polaris principal role ${role_name} already exists"
+  else
+    echo "Unexpected Polaris principal-roles lookup status ${pr_status}" >&2
+    cat "${pr_file}" >&2 || true
+    return 1
+  fi
+
+  # Bind the principal role to catalog-role catalog_admin on the quicksense catalog.
+  local bind_file="/tmp/quicksense-polaris-principal-role-bind.json"
+  local bind_status
+  bind_status="$(curl -s -o "${bind_file}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${token}" \
+    -H "Polaris-Realm: ${POLARIS_REALM:-POLARIS}" \
+    -H "Content-Type: application/json" \
+    -X PUT \
+    "${mgmt_base}/principal-roles/${role_name}/catalog-roles/${catalog}" \
+    -d '{"catalogRole":{"name":"catalog_admin"}}')"
+
+  case "${bind_status}" in
+    200|201|204|409)
+      echo "Bound Polaris principal role ${role_name} -> catalog-roles/catalog_admin on ${catalog}"
+      ;;
+    *)
+      echo "Unexpected Polaris principal-role bind status ${bind_status}" >&2
+      cat "${bind_file}" >&2 || true
+      return 1
+      ;;
+  esac
+}
+
 verify_keycloak() {
   local token_url="http://localhost:${KEYCLOAK_PORT:-8082}/realms/${KEYCLOAK_REALM:-quicksense}/protocol/openid-connect/token"
   curl --fail-with-body -sS "${token_url}" \

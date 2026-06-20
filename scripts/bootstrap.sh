@@ -29,6 +29,7 @@ wait_for_http "Keycloak" "http://localhost:${KEYCLOAK_PORT:-8082}/realms/master"
 token="$(polaris_token)"
 ensure_polaris_catalog "${token}"
 ensure_polaris_catalog_admin_grant "${token}"
+ensure_polaris_admin_principal_role "${token}"
 verify_keycloak
 
 echo "BOOTSTRAP OK"

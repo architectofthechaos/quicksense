@@ -68,6 +68,7 @@ kubectl run qs-mc-bucket \
 token="$(polaris_token)"
 ensure_polaris_catalog "${token}"
 ensure_polaris_catalog_admin_grant "${token}"
+ensure_polaris_admin_principal_role "${token}"
 verify_keycloak
 
 echo "BOOTSTRAP OK"
