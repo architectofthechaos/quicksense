@@ -401,3 +401,9 @@ def test_api_readme_documents_env_routes_and_run():
         "cmd/quicksense-api",
     ]:
         assert needle in readme, needle
+
+
+def test_keycloak_realm_sslrequired_none():
+    """Dev realm sets sslRequired=NONE (spec §4.3) to avoid the HTTPS-required nag."""
+    realm = yaml.safe_load(read("docker/keycloak/realm-quicksense.json"))
+    assert realm["sslRequired"] == "NONE"

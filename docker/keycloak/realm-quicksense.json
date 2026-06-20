@@ -1,6 +1,7 @@
 {
   "realm": "quicksense",
   "enabled": true,
+  "sslRequired": "NONE",
   "roles": {
     "realm": [
       {
