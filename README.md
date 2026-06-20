@@ -43,6 +43,7 @@ Use `task ps` for health, `task logs -- polaris` for logs, `task down` to stop c
 | Keycloak | `http://localhost:8082` | admin `admin` / `admin` |
 | Keycloak realm | `http://localhost:8082/realms/quicksense` | client `quicksense-api` / `qs-api-secret`, user `qsuser` / `qs-password` |
 | QuickSense API | `kubectl port-forward svc/quicksense-api 8090:8090 -n default` (kind) | Keycloak JWT (see Phase B) |
+| QuickSense UI | `http://localhost:3000` (`task ui-dev`) | log in as `qsuser` / `qs-password` via Keycloak |
 
 All defaults are in `.env.example`. `task up` copies it to `.env` if needed. These are development credentials only.
 
@@ -137,6 +138,78 @@ task kind-up && task operator-install && task kind-bootstrap && task api-build &
 | `task api-run` | Apply `deploy/k8s/api.yaml` and wait for rollout |
 | `task operator-install` | Helm-install the Spark Operator (chart 2.5.1) |
 | `task api-e2e` | End-to-end flow: Keycloak token → catalog → cluster → SparkConnect roundtrip → Trino |
+
+## Sprint 3 — Run the Web UI
+
+The Next.js web UI (`ui/`) is the first visible slice: log in with Keycloak and
+drive the **cluster lifecycle** (list → create → watch reach Ready → delete) end
+to end against the real Go API, carrying your Keycloak token.
+
+Because a cluster is a `SparkConnect` CR reconciled by the Spark Operator, the
+full flow runs against the **kind** stack (Compose has no operator, so a cluster
+can never reach Ready there).
+
+### 1. Bring up the stack on kind
+
+```sh
+task up                 # builds the quicksense-spark + trino-client images kind reuses
+task kind-up            # base stack (postgres/polaris/minio/trino/keycloak) on kind
+task operator-install   # Kubeflow Spark Operator 2.5.1
+task kind-bootstrap     # MinIO bucket + Polaris catalog + Keycloak OIDC
+task api-build          # build + kind-load the API image
+task api-run            # deploy the API (sets KEYCLOAK_ISSUER for browser tokens)
+```
+
+> If Keycloak was already running before this sprint, recreate it so the new
+> `quicksense-ui` realm client is imported: `task kind-down && task kind-up …`.
+
+### 2. Expose the API to the host
+
+Keycloak is already on `http://localhost:8082` (kind NodePort `30082→8082`).
+Port-forward the API:
+
+```sh
+kubectl port-forward svc/quicksense-api 8090:8090 -n default &
+```
+
+### 3. Configure and start the UI
+
+```sh
+cd ui
+cp .env.local.example .env.local
+# Set AUTH_SECRET (openssl rand -base64 32).
+# AUTH_KEYCLOAK_SECRET must equal KEYCLOAK_UI_CLIENT_SECRET from the repo .env (default qs-ui-secret).
+task ui-install        # or: npm install
+task ui-dev            # http://localhost:3000
+```
+
+Visiting `http://localhost:3000` redirects to Keycloak. Log in as **`qsuser` /
+`qs-password`**, land on the Clusters page, create a cluster, watch its phase
+badge reach **Ready** (polling), then delete it. Log out from the top-right menu.
+
+### UI environment variables (`ui/.env.local`)
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `AUTH_SECRET` | Auth.js session encryption | (generate) |
+| `AUTH_KEYCLOAK_ID` | OIDC client id | `quicksense-ui` |
+| `AUTH_KEYCLOAK_SECRET` | OIDC client secret (matches `KEYCLOAK_UI_CLIENT_SECRET`) | `qs-ui-secret` |
+| `AUTH_KEYCLOAK_ISSUER` | Keycloak realm issuer | `http://localhost:8082/realms/quicksense` |
+| `QUICKSENSE_API_BASE_URL` | Go API base (port-forwarded) | `http://localhost:8090` |
+
+### How the token reaches the API
+
+Auth.js runs the Authorization Code + PKCE flow against the `quicksense-ui`
+confidential client and stores the access token **server-side** in an HttpOnly
+session. The browser never sees the token: client components poll same-origin
+Next.js route handlers (`/api/clusters*`), which read the session server-side and
+forward `Authorization: Bearer <token>` to the Go API. Because the browser mints
+its token via `localhost:8082`, the API is configured with
+`KEYCLOAK_ISSUER=http://localhost:8082/realms/quicksense` (it still fetches JWKS
+from the in-cluster `keycloak:8082`).
+
+`task ui-build` runs lint + typecheck + the production build; `task ui-test` runs
+the unit/component suite.
 
 ## Build-time downloads
 
