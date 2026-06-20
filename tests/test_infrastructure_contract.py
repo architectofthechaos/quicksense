@@ -426,7 +426,7 @@ def test_spark_operator_assets_present_and_pinned():
 
     # 2. NOTES.md must reference the pinned chart version and repo URL
     notes = read("deploy/k8s/spark-operator/NOTES.md")
-    assert "2.4.0" in notes
+    assert "2.5.1" in notes
     assert "kubeflow.github.io/spark-operator" in notes
 
     # 3. Taskfile must expose an operator-install target referencing the script
@@ -434,9 +434,9 @@ def test_spark_operator_assets_present_and_pinned():
     assert re.search(r"(?m)^  operator-install:\s*$", tf), "operator-install target missing"
     assert "scripts/k8s/operator-install.sh" in tf
 
-    # 4. Install script must contain helm, --version, 2.4.0, and success marker
+    # 4. Install script must contain helm, --version, 2.5.1, and success marker
     script = read("scripts/k8s/operator-install.sh")
-    for needle in ["helm", "--version", "2.4.0", "OPERATOR INSTALL OK"]:
+    for needle in ["helm", "--version", "2.5.1", "OPERATOR INSTALL OK"]:
         assert needle in script, f"Missing '{needle}' in operator-install.sh"
 
     # 5. values.yaml must name the watched namespace

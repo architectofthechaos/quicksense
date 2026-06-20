@@ -86,11 +86,13 @@ func buildCR(s ClusterSpec, namespace string) *unstructured.Unstructured {
 					"app.kubernetes.io/managed-by": "quicksense",
 				},
 			},
+			// Spec shape reconciled against the installed CRD in B17:
+			// sparkVersion (required), top-level image, server (required object),
+			// executor.instances. See `kubectl explain sparkconnect.spec`.
 			"spec": map[string]interface{}{
 				"sparkVersion": "4.0.3",
-				"spark": map[string]interface{}{
-					"image": s.Image,
-				},
+				"image":        s.Image,
+				"server":       map[string]interface{}{},
 				"executor": map[string]interface{}{
 					"instances": int64(s.Executors),
 				},

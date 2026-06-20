@@ -58,13 +58,17 @@ func TestCreateProducesCRWithExpectedSpec(t *testing.T) {
 	if kk != "SparkConnect" {
 		t.Errorf("kind: got %q, want SparkConnect", kk)
 	}
-	// spec.spark.image
-	img, found, err2 := unstructured.NestedString(got.Object, "spec", "spark", "image")
+	// spec.image (top-level, per the SparkConnect CRD)
+	img, found, err2 := unstructured.NestedString(got.Object, "spec", "image")
 	if err2 != nil || !found {
-		t.Fatalf("spec.spark.image missing or error: found=%v err=%v", found, err2)
+		t.Fatalf("spec.image missing or error: found=%v err=%v", found, err2)
 	}
 	if img != "quicksense-spark:dev" {
-		t.Errorf("spec.spark.image: got %q, want quicksense-spark:dev", img)
+		t.Errorf("spec.image: got %q, want quicksense-spark:dev", img)
+	}
+	// spec.server is a required object on the CRD
+	if _, found, _ := unstructured.NestedMap(got.Object, "spec", "server"); !found {
+		t.Errorf("spec.server missing (required by the SparkConnect CRD)")
 	}
 	// spec.executor.instances
 	inst, found, err3 := unstructured.NestedInt64(got.Object, "spec", "executor", "instances")
