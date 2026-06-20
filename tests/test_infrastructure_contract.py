@@ -442,3 +442,54 @@ def test_spark_operator_assets_present_and_pinned():
     # 5. values.yaml must name the watched namespace
     values = read("deploy/k8s/spark-operator/values.yaml")
     assert "quicksense" in values
+
+
+# ---------------------------------------------------------------------------
+# Task B18: Polaris external OIDC (mixed realm)
+# ---------------------------------------------------------------------------
+
+
+def test_polaris_manifest_has_mixed_oidc_config():
+    """Polaris Deployment env must contain external OIDC (Keycloak) + mixed-auth keys."""
+    raw = read("deploy/k8s/base/polaris.yaml")
+    # OIDC tenant enabled
+    assert "quarkus.oidc.tenant-enabled" in raw
+    # Keycloak issuer URL
+    assert "http://keycloak:8082/realms/quicksense" in raw
+    # Client-id key and value
+    assert "quarkus.oidc.client-id" in raw
+    assert "quicksense-api" in raw
+    # Role claim path key and value
+    assert "quarkus.oidc.roles.role-claim-path" in raw
+    assert "realm_access/roles" in raw
+    # Principal-roles mapper type
+    assert "polaris.oidc.principal-roles-mapper.type" in raw
+    # Mapper regex: ^polaris_(.*)
+    assert "^polaris_(.*)" in raw
+    # Mapper replacement: PRINCIPAL_ROLE:$1
+    assert "PRINCIPAL_ROLE:$1" in raw
+    # Internal realm must still be present (mixed mode)
+    assert "POLARIS" in raw
+
+
+# ---------------------------------------------------------------------------
+# Task B19: Bootstrap — Polaris admin principal-role
+# ---------------------------------------------------------------------------
+
+
+def test_bootstrap_creates_polaris_admin_principal_role():
+    """bootstrap-common.sh must contain ensure_polaris_admin_principal_role and both
+    bootstrap scripts must call it."""
+    lib = read("scripts/lib/bootstrap-common.sh")
+    # Function must exist with principal-role API paths
+    assert "principal-roles" in lib
+    assert '"admin"' in lib or 'name":"admin' in lib or "name\": \"admin" in lib
+    assert "catalog-roles" in lib
+    assert "ensure_polaris_admin_principal_role" in lib
+
+    # Both call-sites must invoke the function
+    bootstrap = read("scripts/bootstrap.sh")
+    assert "ensure_polaris_admin_principal_role" in bootstrap
+
+    kind_bootstrap = read("scripts/k8s/kind-bootstrap.sh")
+    assert "ensure_polaris_admin_principal_role" in kind_bootstrap
