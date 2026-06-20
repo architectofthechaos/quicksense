@@ -128,6 +128,41 @@ func TestLoadFrom_CustomHosts(t *testing.T) {
 	}
 }
 
+func TestLoadFrom_KeycloakIssuerDefault(t *testing.T) {
+	// With KEYCLOAK_ISSUER unset, the issuer is derived from host/port/realm.
+	cfg, err := config.LoadFrom(fakeEnv(fullEnv))
+	if err != nil {
+		t.Fatalf("LoadFrom error: %v", err)
+	}
+	want := "http://" + cfg.KeycloakHost + ":" + cfg.KeycloakPort + "/realms/" + cfg.KeycloakRealm
+	if cfg.KeycloakIssuer != want {
+		t.Errorf("KeycloakIssuer default = %q; want %q", cfg.KeycloakIssuer, want)
+	}
+}
+
+func TestLoadFrom_KeycloakIssuerOverride(t *testing.T) {
+	// KEYCLOAK_ISSUER override is used verbatim (browser tokens carry a
+	// different issuer host than the in-cluster JWKS fetch host).
+	env := make(map[string]string)
+	for k, v := range fullEnv {
+		env[k] = v
+	}
+	env["KEYCLOAK_ISSUER"] = "http://localhost:8082/realms/quicksense"
+
+	cfg, err := config.LoadFrom(fakeEnv(env))
+	if err != nil {
+		t.Fatalf("LoadFrom error: %v", err)
+	}
+	if cfg.KeycloakIssuer != "http://localhost:8082/realms/quicksense" {
+		t.Errorf("KeycloakIssuer override = %q; want %q", cfg.KeycloakIssuer, "http://localhost:8082/realms/quicksense")
+	}
+	// JWKS URL must remain derived from the (internal) host, not the issuer override.
+	wantJWKS := "http://keycloak:8082/realms/quicksense/protocol/openid-connect/certs"
+	if cfg.KeycloakJWKSURL != wantJWKS {
+		t.Errorf("KeycloakJWKSURL = %q; want %q (must not follow issuer override)", cfg.KeycloakJWKSURL, wantJWKS)
+	}
+}
+
 func TestLoadFrom_MissingRequired(t *testing.T) {
 	// Empty env — all required vars missing; should return a non-nil error.
 	_, err := config.LoadFrom(fakeEnv(map[string]string{}))

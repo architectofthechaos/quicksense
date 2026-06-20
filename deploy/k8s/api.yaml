@@ -85,6 +85,11 @@ spec:
               value: "default"
             - name: QS_CLUSTER_EXECUTORS
               value: "1"
+            # Browser-minted Keycloak tokens carry iss=http://localhost:8082/...
+            # (the host the user logs in through). The API fetches JWKS internally
+            # from keycloak:8082 but must validate `iss` against the browser host.
+            - name: KEYCLOAK_ISSUER
+              value: "http://localhost:8082/realms/quicksense"
           readinessProbe:
             httpGet:
               path: /healthz

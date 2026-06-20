@@ -82,10 +82,11 @@ func main() {
 	log.Printf("quicksense-api: polaris client targeting %s", polarisBaseURL)
 
 	// ── 6. Keycloak JWT verifier ──────────────────────────────────────────────
-	// Derive the issuer from host/port/realm; cfg.KeycloakJWKSURL is pre-built
-	// with the same components so the two values are always consistent.
-	issuer := fmt.Sprintf("http://%s:%s/realms/%s",
-		cfg.KeycloakHost, cfg.KeycloakPort, cfg.KeycloakRealm)
+	// The issuer comes from config (KEYCLOAK_ISSUER override, or host/port/realm-
+	// derived by default). JWKS is always fetched from cfg.KeycloakJWKSURL, so the
+	// two may differ when browser-minted tokens carry a different issuer host
+	// (e.g. localhost:8082) than the in-cluster JWKS fetch host (keycloak:8082).
+	issuer := cfg.KeycloakIssuer
 	v, err := auth.NewKeycloakVerifier(ctx, cfg.KeycloakJWKSURL, issuer, cfg.RequiredRole)
 	if err != nil {
 		log.Fatalf("quicksense-api: keycloak verifier: %v", err)

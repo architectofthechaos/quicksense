@@ -46,6 +46,13 @@ type Config struct {
 	// Pattern: http://<host>:<port>/realms/<realm>/protocol/openid-connect/certs
 	KeycloakJWKSURL string
 
+	// KeycloakIssuer is the expected `iss` claim on validated JWTs.
+	// Default: derived from host/port/realm (same as JWKS). Override with
+	// KEYCLOAK_ISSUER when browser-minted tokens carry a different issuer host
+	// (e.g. localhost vs the in-cluster keycloak service). The JWKS fetch URL is
+	// always KeycloakJWKSURL, so the two may differ.
+	KeycloakIssuer string
+
 	// RequiredRole is the Keycloak role checked on every authenticated request.
 	// Default: "polaris_admin".
 	RequiredRole string
@@ -151,6 +158,8 @@ func LoadFrom(getenv func(string) string) (*Config, error) {
 		pgUser, pgPass, pgHost, pgPort)
 	jwksURL := fmt.Sprintf("http://%s:%s/realms/%s/protocol/openid-connect/certs",
 		kcHost, kcPort, kcRealm)
+	derivedIssuer := fmt.Sprintf("http://%s:%s/realms/%s", kcHost, kcPort, kcRealm)
+	keycloakIssuer := withDefault("KEYCLOAK_ISSUER", derivedIssuer)
 
 	requiredRole := withDefault("REQUIRED_ROLE", "polaris_admin")
 
@@ -198,6 +207,7 @@ func LoadFrom(getenv func(string) string) (*Config, error) {
 		KeycloakClientID:     kcClientID,
 		KeycloakClientSecret: kcClientSecret,
 		KeycloakJWKSURL:      jwksURL,
+		KeycloakIssuer:       keycloakIssuer,
 
 		RequiredRole: requiredRole,
 
