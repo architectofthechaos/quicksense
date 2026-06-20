@@ -180,6 +180,7 @@ services:
       KC_HEALTH_ENABLED: "true"
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-qs-api-secret}
       KEYCLOAK_TEST_PASSWORD: ${KEYCLOAK_TEST_PASSWORD:-qs-password}
+      KEYCLOAK_UI_CLIENT_SECRET: ${KEYCLOAK_UI_CLIENT_SECRET:-qs-ui-secret}
     ports:
       - "${KEYCLOAK_PORT:-8082}:8082"
     volumes:
