@@ -372,3 +372,65 @@ func (f *fakeK8sDeleteNotFound) Delete(_ context.Context, name string) error {
 		Resource: "sparkconnects",
 	}, name)
 }
+
+// ---------------------------------------------------------------------------
+// B12/B13 review additions: compensating-path coverage
+// ---------------------------------------------------------------------------
+
+// TestPostCluster_StoreError_Returns500 covers the case where the SparkConnect
+// CR is created but the DB insert fails: the handler must return 500 (the CR is
+// logged for manual cleanup) while having called k8s.Create exactly once.
+func TestPostCluster_StoreError_Returns500(t *testing.T) {
+	fs := newFakeStore()
+	fs.nextErr = fmt.Errorf("db down")
+	fk := newFakeK8s()
+	mux := clusterMux(fs, fk)
+
+	body, _ := json.Marshal(map[string]string{"name": "demo"})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodPost, "/v1/clusters", body))
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d; body: %s", w.Code, w.Body.String())
+	}
+	if n := fk.createCount(); n != 1 {
+		t.Fatalf("expected 1 k8s.Create call (CR created before DB failure), got %d", n)
+	}
+	if n := fs.count(); n != 0 {
+		t.Fatalf("expected 0 stored rows after DB failure, got %d", n)
+	}
+}
+
+// TestGetCluster_ToleratesK8sNotFound covers a single-cluster GET whose CR has
+// gone missing: the handler reports phase "Unknown" and still returns 200.
+func TestGetCluster_ToleratesK8sNotFound(t *testing.T) {
+	fs := newFakeStore()
+	fk := newFakeK8s()
+
+	crName := "qs-gone-xyz"
+	fk.notFoundNames[crName] = true
+	fs.seed(&store.Cluster{
+		ID:        "gone-id",
+		Name:      "gone",
+		Namespace: "quicksense",
+		CRName:    crName,
+		Phase:     store.ClusterPhasePending,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
+
+	mux := clusterMux(fs, fk)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodGet, "/v1/clusters/gone-id", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 with gone CR, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["phase"] != "Unknown" {
+		t.Fatalf("expected phase 'Unknown', got %v", resp["phase"])
+	}
+}
