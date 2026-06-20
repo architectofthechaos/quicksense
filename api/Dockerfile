@@ -39,8 +39,8 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-arm64} \
     -o /quicksense-api ./cmd/quicksense-api
 
 # ─── Stage 2: runtime ────────────────────────────────────────────────────────
-# :nonroot is a concrete, non-floating tag (avoids implicit :latest) and runs as
-# an unprivileged user. A sha256 digest pin is the stricter follow-up.
+# nonroot is a concrete, non-floating tag (avoids the implicit default tag) and
+# runs as an unprivileged user. A sha256 digest pin is the stricter follow-up.
 FROM gcr.io/distroless/static-debian12:nonroot
 
 # Copy the static binary from the builder stage.
