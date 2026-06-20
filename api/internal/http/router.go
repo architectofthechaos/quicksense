@@ -13,18 +13,19 @@ import (
 
 	"github.com/deepiq/quicksense/api/internal/auth"
 	"github.com/deepiq/quicksense/api/internal/polaris"
+	"github.com/deepiq/quicksense/api/internal/store"
 )
 
 // RouterDeps is the dependency-injection bundle passed to NewRouter.
 //
 // Fields added by later tasks:
-//   - Store    store.Store           — B5/B6: Postgres store
 //   - K8s      k8s.SparkConnectClient — B10: Spark compute client
 //   - Namespace   string             — SparkConnect namespace
 //   - DefaultExec int32              — default executor count
 type RouterDeps struct {
 	Verifier auth.TokenVerifier // B4: Keycloak JWT verifier
 	Polaris  polaris.Client     // B7: Polaris REST proxy
+	Store    store.Store        // B9: Postgres store (used by B12-B14 cluster handlers)
 }
 
 // NewRouter builds and returns a configured chi.Mux.

@@ -325,3 +325,79 @@ def test_root_readme_documents_two_tiers():
     for n in ["task kind-up", "task kind-bootstrap", "task kind-roundtrip", "task kind-down",
               "dev mode", "Kubernetes"]:
         assert n in r, n
+
+
+# ---------------------------------------------------------------------------
+# Task B9: main wiring + Dockerfile + api/README
+# ---------------------------------------------------------------------------
+
+
+def test_api_b9_required_files_exist():
+    """api/go.mod, main.go, Dockerfile, and api/README.md must all exist."""
+    required = [
+        "api/go.mod",
+        "api/cmd/quicksense-api/main.go",
+        "api/Dockerfile",
+        "api/README.md",
+    ]
+    missing = [p for p in required if not (ROOT / p).is_file()]
+    assert not missing, missing
+
+
+def test_api_go_mod_module_and_deps():
+    """go.mod must declare the right module path and key dependencies."""
+    gomod = read("api/go.mod")
+    assert "module github.com/deepiq/quicksense/api" in gomod
+    for dep in ["go-chi/chi", "pgx", "golang-migrate", "golang-jwt", "keyfunc"]:
+        assert dep in gomod, dep
+
+
+def test_api_main_wires_full_dependency_chain():
+    """main.go must reference config, store, polaris, auth and http packages."""
+    main = read("api/cmd/quicksense-api/main.go")
+    for needle in [
+        "config.Load",
+        "store.EnsureDatabase",
+        "store.Migrate",
+        "store.New",
+        "polaris.NewHTTPClient",
+        "auth.NewKeycloakVerifier",
+        "httpapi.NewRouter",
+        "httpapi.RouterDeps",
+        ":8080",
+    ]:
+        assert needle in main, needle
+
+
+def test_api_dockerfile_is_multistage():
+    """Dockerfile must be multi-stage (builder + runtime) with pinned images."""
+    df = read("api/Dockerfile")
+    # Two FROM lines = multi-stage
+    assert df.count("FROM ") >= 2
+    # No :latest
+    assert ":latest" not in df
+    # Builder uses a golang image
+    assert "golang:" in df
+    # Runtime is distroless or alpine
+    assert ("distroless" in df or "alpine:" in df)
+    # Build the binary
+    assert "go build" in df
+    assert "quicksense-api" in df
+    # Expose port
+    assert "EXPOSE 8080" in df
+    assert "ENTRYPOINT" in df
+
+
+def test_api_readme_documents_env_routes_and_run():
+    """api/README.md must cover env vars, routes, and how to run."""
+    readme = read("api/README.md")
+    for needle in [
+        "POSTGRES_",
+        "POLARIS_",
+        "KEYCLOAK_",
+        "/healthz",
+        "/v1/catalogs",
+        "go run",
+        "cmd/quicksense-api",
+    ]:
+        assert needle in readme, needle
