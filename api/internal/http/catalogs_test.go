@@ -4,77 +4,13 @@ package httpapi
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/deepiq/quicksense/api/internal/auth"
 	"github.com/deepiq/quicksense/api/internal/polaris"
 )
-
-// ---------------------------------------------------------------------------
-// fakeVerifier — always succeeds with a fixed Principal.
-// ---------------------------------------------------------------------------
-
-type fakeVerifier struct{}
-
-func (fakeVerifier) Verify(_ context.Context, _ string) (*auth.Principal, error) {
-	return &auth.Principal{Username: "qsuser", Roles: []string{"polaris_admin"}}, nil
-}
-
-// ---------------------------------------------------------------------------
-// fakePolaris — records calls and returns canned responses.
-// ---------------------------------------------------------------------------
-
-type fakePolaris struct {
-	catalogs         []polaris.Catalog
-	createdCatalog   polaris.CreateCatalogParams
-	tables           []polaris.Table
-	listedCatalog    string
-	listedNamespace  string
-	createdTable     polaris.CreateTableParams
-	createdTCatalog  string
-	createdTNS       string
-}
-
-func (f *fakePolaris) ListCatalogs(_ context.Context) ([]polaris.Catalog, error) {
-	return f.catalogs, nil
-}
-
-func (f *fakePolaris) CreateCatalog(_ context.Context, p polaris.CreateCatalogParams) (*polaris.Catalog, error) {
-	f.createdCatalog = p
-	return &polaris.Catalog{Name: p.Name, Type: "INTERNAL"}, nil
-}
-
-func (f *fakePolaris) ListTables(_ context.Context, catalog, namespace string) ([]polaris.Table, error) {
-	f.listedCatalog = catalog
-	f.listedNamespace = namespace
-	return f.tables, nil
-}
-
-func (f *fakePolaris) CreateTable(_ context.Context, catalog, namespace string, p polaris.CreateTableParams) (*polaris.Table, error) {
-	f.createdTCatalog = catalog
-	f.createdTNS = namespace
-	f.createdTable = p
-	return &polaris.Table{Name: p.Name, Namespace: namespace}, nil
-}
-
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-// newTestMux builds a router with fakeVerifier and the supplied fakePolaris.
-func newTestMux(fp *fakePolaris) http.Handler {
-	return NewRouter(RouterDeps{
-		Verifier: fakeVerifier{},
-		Polaris:  fp,
-	})
-}
-
-// bearerHeader returns an Authorization header value accepted by fakeVerifier.
-const bearerHeader = "Bearer test-token"
 
 // ---------------------------------------------------------------------------
 // Catalog tests

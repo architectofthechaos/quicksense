@@ -12,20 +12,20 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/deepiq/quicksense/api/internal/auth"
+	"github.com/deepiq/quicksense/api/internal/k8s"
 	"github.com/deepiq/quicksense/api/internal/polaris"
 	"github.com/deepiq/quicksense/api/internal/store"
 )
 
 // RouterDeps is the dependency-injection bundle passed to NewRouter.
-//
-// Fields added by later tasks:
-//   - K8s      k8s.SparkConnectClient — B10: Spark compute client
-//   - Namespace   string             — SparkConnect namespace
-//   - DefaultExec int32              — default executor count
 type RouterDeps struct {
-	Verifier auth.TokenVerifier // B4: Keycloak JWT verifier
-	Polaris  polaris.Client     // B7: Polaris REST proxy
-	Store    store.Store        // B9: Postgres store (used by B12-B14 cluster handlers)
+	Verifier auth.TokenVerifier     // B4: Keycloak JWT verifier
+	Polaris  polaris.Client         // B7: Polaris REST proxy
+	Store    store.Store            // B9: Postgres store
+	K8s      k8s.SparkConnectClient // B12: Spark compute client
+	Namespace   string              // SparkConnect target namespace
+	DefaultExec int32               // default executor count per cluster
+	SparkImage  string              // Spark container image
 }
 
 // NewRouter builds and returns a configured chi.Mux.
@@ -48,8 +48,17 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 		th := &tableHandler{polaris: deps.Polaris}
 		r.Get("/catalogs/{catalog}/namespaces/{namespace}/tables", th.list)
 		r.Post("/catalogs/{catalog}/namespaces/{namespace}/tables", th.create)
-		// ── COMPUTE PLANNER (B12-B13): mount cluster routes here:
-		//   POST/GET /clusters, GET/DELETE /clusters/{id}
+		clh := &clusterHandler{
+			store:       deps.Store,
+			k8s:         deps.K8s,
+			namespace:   deps.Namespace,
+			defaultExec: deps.DefaultExec,
+			sparkImage:  deps.SparkImage,
+		}
+		r.Post("/clusters", clh.create)
+		r.Get("/clusters", clh.list)
+		r.Get("/clusters/{id}", clh.get)
+		r.Delete("/clusters/{id}", clh.delete)
 	})
 
 	return r
