@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/deepiq/quicksense/api/internal/k8s"
 	"github.com/deepiq/quicksense/api/internal/store"
@@ -138,19 +140,96 @@ func (h *clusterHandler) create(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusCreated, toClusterResponse(*cluster, k8s.ClusterStatus{}))
 }
 
-// list, get, delete — implemented in B13.
-// Stubs satisfy the router mounts declared in router.go.
-
+// list handles GET /v1/clusters.
+// For each DB row it calls k8s.Get to merge live phase; a missing CR is
+// tolerated (phase "Unknown") so the list never fails due to a gone CR.
 func (h *clusterHandler) list(w http.ResponseWriter, r *http.Request) {
-	WriteError(w, http.StatusNotImplemented, "not_implemented", "list clusters not yet implemented")
+	clusters, err := h.store.ListClusters(r.Context())
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "store_error", "failed to list clusters")
+		return
+	}
+
+	results := make([]clusterResponse, 0, len(clusters))
+	for _, c := range clusters {
+		status, err := h.k8s.Get(r.Context(), c.CRName)
+		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				// Tolerate a missing CR — report phase as "Unknown".
+				status = k8s.ClusterStatus{Name: c.CRName, Phase: "Unknown"}
+			} else {
+				// Non-NotFound errors degrade the entry but don't fail the list.
+				log.Printf("WARN: k8s.Get(%q) failed: %v", c.CRName, err)
+				status = k8s.ClusterStatus{Name: c.CRName, Phase: "Unknown"}
+			}
+		}
+		results = append(results, toClusterResponse(c, status))
+	}
+
+	WriteJSON(w, http.StatusOK, map[string]any{"clusters": results})
 }
 
+// get handles GET /v1/clusters/{id}.
+// Returns 404 if the cluster is not found in the store.
 func (h *clusterHandler) get(w http.ResponseWriter, r *http.Request) {
-	_ = chi.URLParam(r, "id")
-	WriteError(w, http.StatusNotImplemented, "not_implemented", "get cluster not yet implemented")
+	id := chi.URLParam(r, "id")
+
+	cluster, err := h.store.GetCluster(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			WriteError(w, http.StatusNotFound, "not_found", "cluster not found")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, "store_error", "failed to get cluster")
+		return
+	}
+
+	status, err := h.k8s.Get(r.Context(), cluster.CRName)
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			status = k8s.ClusterStatus{Name: cluster.CRName, Phase: "Unknown"}
+		} else {
+			log.Printf("WARN: k8s.Get(%q) failed: %v", cluster.CRName, err)
+			status = k8s.ClusterStatus{Name: cluster.CRName, Phase: "Unknown"}
+		}
+	}
+
+	WriteJSON(w, http.StatusOK, toClusterResponse(*cluster, status))
 }
 
+// delete handles DELETE /v1/clusters/{id}.
+// It deletes the k8s CR (tolerating a k8s NotFound so the operation is
+// idempotent), then removes the DB row. Returns 204 on success.
 func (h *clusterHandler) delete(w http.ResponseWriter, r *http.Request) {
-	_ = chi.URLParam(r, "id")
-	WriteError(w, http.StatusNotImplemented, "not_implemented", "delete cluster not yet implemented")
+	id := chi.URLParam(r, "id")
+
+	cluster, err := h.store.GetCluster(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			WriteError(w, http.StatusNotFound, "not_found", "cluster not found")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, "store_error", "failed to get cluster")
+		return
+	}
+
+	if err := h.k8s.Delete(r.Context(), cluster.CRName); err != nil {
+		// Tolerate k8s NotFound — CR may have been deleted out-of-band.
+		if !k8serrors.IsNotFound(err) {
+			WriteError(w, http.StatusBadGateway, "provision_error", "failed to delete SparkConnect CR: "+err.Error())
+			return
+		}
+	}
+
+	if err := h.store.DeleteCluster(r.Context(), id); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			// Already gone from DB — still succeed.
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, "store_error", "failed to delete cluster record")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
