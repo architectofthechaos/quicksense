@@ -234,8 +234,9 @@ func TestConfigParsesSparkFields(t *testing.T) {
 		if cfg.SparkImage != "quicksense-spark:latest" {
 			t.Errorf("SparkImage default = %q; want %q", cfg.SparkImage, "quicksense-spark:latest")
 		}
-		if cfg.SparkConnectNamespace != "quicksense" {
-			t.Errorf("SparkConnectNamespace default = %q; want %q", cfg.SparkConnectNamespace, "quicksense")
+		// Default is "default" (co-located with the base stack so short-name DNS resolves).
+		if cfg.SparkConnectNamespace != "default" {
+			t.Errorf("SparkConnectNamespace default = %q; want %q", cfg.SparkConnectNamespace, "default")
 		}
 		if cfg.ClusterDefaultExecutors != 1 {
 			t.Errorf("ClusterDefaultExecutors default = %d; want %d", cfg.ClusterDefaultExecutors, 1)

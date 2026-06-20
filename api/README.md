@@ -122,12 +122,14 @@ task api-build   # docker build + kind load
 task api-run     # apply deploy/k8s/api.yaml, wait for rollout
 ```
 
-The API is deployed into the `quicksense` namespace as `deploy/k8s/api.yaml` (Deployment
-+ Service + ServiceAccount + RBAC for SparkConnect CRs). The Service exposes port 8090.
+The API is deployed into the `default` namespace as `deploy/k8s/api.yaml` (Deployment
++ Service + ServiceAccount + RBAC for SparkConnect CRs), co-located with the base
+stack (polaris/minio/trino/keycloak) so SparkConnect driver/executor pods resolve
+short-name DNS (e.g. `polaris`, `minio`). The Service exposes port 8090.
 To reach the API from your laptop:
 
 ```sh
-kubectl port-forward svc/quicksense-api 8090:8090 -n quicksense
+kubectl port-forward svc/quicksense-api 8090:8090 -n default
 ```
 
 Then obtain a Keycloak token and call the API:

@@ -3,11 +3,13 @@
 # QuickSense API — Kubernetes manifests
 #
 # Namespace strategy: the API Deployment, ServiceAccount, and RBAC all live in
-# the `quicksense` namespace (same as SparkConnect CRs managed by the operator).
-# qs-config/qs-secrets are created in `default` by kind-up.sh; `api-run` copies
-# them into `quicksense` before applying this file (see Taskfile api-run target).
-# This keeps the ServiceAccount local to the namespace that owns the SparkConnect
-# CRs, avoiding any cross-namespace SA reference in the RoleBinding.
+# the `default` namespace (co-located with the base stack: postgres/polaris/minio/
+# trino/keycloak), which is also the namespace the Spark Operator watches for
+# SparkConnect CRs.  Co-location ensures that SparkConnect driver/executor pods
+# resolve `polaris` and `minio` by short name (Polaris advertises short-name
+# REST endpoints; cross-namespace short-name DNS fails with UnknownHostException).
+#
+# qs-config/qs-secrets are created in `default` by kind-up.sh and api-run target.
 #
 # Probes: /healthz on port 8080 (registered in main.go).
 # Service: ClusterIP port 8090 → container 8080; the e2e script port-forwards it.
@@ -16,13 +18,13 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: quicksense-api
-  namespace: quicksense
+  namespace: default
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: quicksense-api-sparkconnects
-  namespace: quicksense
+  namespace: default
 rules:
   - apiGroups:
       - sparkoperator.k8s.io
@@ -39,11 +41,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: quicksense-api-sparkconnects
-  namespace: quicksense
+  namespace: default
 subjects:
   - kind: ServiceAccount
     name: quicksense-api
-    namespace: quicksense
+    namespace: default
 roleRef:
   kind: Role
   name: quicksense-api-sparkconnects
@@ -53,7 +55,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: quicksense-api
-  namespace: quicksense
+  namespace: default
 spec:
   replicas: 1
   selector:
@@ -80,7 +82,7 @@ spec:
             - name: QS_SPARK_IMAGE
               value: "quicksense-spark:latest"
             - name: QS_SPARK_NAMESPACE
-              value: "quicksense"
+              value: "default"
             - name: QS_CLUSTER_EXECUTORS
               value: "1"
           readinessProbe:
@@ -104,7 +106,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: quicksense-api
-  namespace: quicksense
+  namespace: default
 spec:
   type: ClusterIP
   selector:

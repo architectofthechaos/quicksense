@@ -439,9 +439,9 @@ def test_spark_operator_assets_present_and_pinned():
     for needle in ["helm", "--version", "2.5.1", "OPERATOR INSTALL OK"]:
         assert needle in script, f"Missing '{needle}' in operator-install.sh"
 
-    # 5. values.yaml must name the watched namespace
+    # 5. values.yaml must name the watched namespace (default — co-located with base stack)
     values = read("deploy/k8s/spark-operator/values.yaml")
-    assert "quicksense" in values
+    assert "default" in values
 
 
 # ---------------------------------------------------------------------------

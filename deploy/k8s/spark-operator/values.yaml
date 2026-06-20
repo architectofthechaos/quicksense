@@ -23,15 +23,22 @@ image:
 # ---------------------------------------------------------------------------
 # Watch namespace
 #
-# The operator watches the `quicksense` namespace for SparkApplication and
-# SparkConnect custom resources.  The Go API creates SparkConnect CRs in
-# this namespace (SPEC-002 §B.7).
+# The operator watches the `default` namespace for SparkApplication and
+# SparkConnect custom resources.  Co-locating the compute in `default` (the
+# same namespace as the base stack: postgres/polaris/minio/trino/keycloak)
+# ensures that SparkConnect driver/executor pods can resolve short-name
+# DNS entries such as `polaris` and `minio` — cross-namespace short-name
+# resolution fails because Polaris advertises short-name REST endpoints.
+# Live-verified: SPARK WROTE (3 rows via sc://e2e-server:15002) + ROUNDTRIP OK.
+#
+# The Go API creates SparkConnect CRs in the `default` namespace (SPEC-002 §B.7).
+# QS_SPARK_NAMESPACE env var overrides the default if a different ns is required.
 #
 # chart 2.5.1 key: spark.jobNamespaces
 # ---------------------------------------------------------------------------
 spark:
   jobNamespaces:
-    - quicksense
+    - default
 
 # ---------------------------------------------------------------------------
 # Webhook
@@ -60,6 +67,6 @@ rbac:
 # Operator namespace
 #
 # The operator itself is installed into `spark-operator`; it watches
-# `quicksense` (see spark.jobNamespaces above).
+# `default` (see spark.jobNamespaces above) where the base stack lives.
 # ---------------------------------------------------------------------------
 # namespace: spark-operator   # set via --namespace in the helm install command

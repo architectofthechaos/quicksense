@@ -48,8 +48,7 @@ Use `task operator-install` which runs `scripts/k8s/operator-install.sh`.
 The script:
 1. Pins the context to `kind-quicksense` (cluster name: `quicksense`).
 2. Adds the Helm repo and updates it.
-3. Creates the `quicksense` namespace (idempotent) — this is where the operator
-   watches for SparkApplication / SparkConnect CRs.
+3. Skips namespace creation — the watched namespace is `default` (pre-existing).
 4. Runs `helm upgrade --install` with `--version 2.5.1` and `-f values.yaml`.
 5. Verifies the `sparkconnects.sparkoperator.k8s.io` CRD exists.
 
@@ -57,10 +56,21 @@ The script:
 
 ## Namespace layout
 
-| Namespace        | Purpose                                          |
-|------------------|--------------------------------------------------|
-| `spark-operator` | Operator controller pod lives here               |
-| `quicksense`     | SparkConnect / SparkApplication CRs created here |
+| Namespace        | Purpose                                                      |
+|------------------|--------------------------------------------------------------|
+| `spark-operator` | Operator controller pod lives here                           |
+| `default`        | SparkConnect / SparkApplication CRs created here (co-located |
+|                  | with base stack: polaris, minio, trino, keycloak, postgres)  |
+
+### Co-location rationale
+
+The base stack (postgres/polaris/minio/trino/keycloak) runs in `default` (applied
+by `kind-up.sh`).  SparkConnect driver and executor pods must resolve `polaris`
+and `minio` by short name because Polaris advertises short-name REST endpoints.
+Kubernetes short-name DNS only resolves within the same namespace, so operator-
+provisioned pods in a different namespace (e.g. `quicksense`) fail with
+`UnknownHostException: polaris`.  Co-locating the compute in `default` fixes this.
+Live-verified: full round-trip `SPARK WROTE` (3 rows) → Trino read → `ROUNDTRIP OK`.
 
 ---
 

@@ -5,7 +5,12 @@
 #
 # Chart:   spark-operator 2.5.1 (https://kubeflow.github.io/spark-operator)
 # Operator namespace: spark-operator
-# Watched namespace:  quicksense (SparkConnect / SparkApplication CRs)
+# Watched namespace:  default (co-located with base stack: polaris/minio/trino/keycloak)
+#
+# Co-location rationale: SparkConnect driver/executor pods land in the same
+# namespace as polaris and minio, so short-name DNS (e.g. "polaris", "minio")
+# resolves correctly.  Polaris advertises short-name REST endpoints, so
+# cross-namespace pods fail with UnknownHostException.
 #
 # Air-gapped note: mirror the chart and image before running offline:
 #   helm pull spark-operator/spark-operator --version 2.5.1
@@ -39,11 +44,10 @@ helm repo add spark-operator https://kubeflow.github.io/spark-operator
 helm repo update spark-operator
 
 # ---------------------------------------------------------------------------
-# Ensure the watched namespace exists (idempotent)
-# The Go API creates SparkConnect CRs in this namespace.
+# The watched namespace is `default` — it already exists in every cluster.
+# No namespace creation step is needed.
+# The Go API creates SparkConnect CRs in `default` (same as the base stack).
 # ---------------------------------------------------------------------------
-echo "Ensuring namespace 'quicksense' exists..."
-kubectl create namespace quicksense --dry-run=client -o yaml | kubectl apply -f -
 
 # ---------------------------------------------------------------------------
 # Install / upgrade the operator

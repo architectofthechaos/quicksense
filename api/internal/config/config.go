@@ -52,7 +52,7 @@ type Config struct {
 
 	// Spark / cluster settings.
 	SparkImage              string // QS_SPARK_IMAGE (default: quicksense-spark:latest)
-	SparkConnectNamespace   string // QS_SPARK_NAMESPACE (default: quicksense)
+	SparkConnectNamespace   string // QS_SPARK_NAMESPACE (default: default — co-located with base stack)
 	ClusterDefaultExecutors int32  // QS_CLUSTER_EXECUTORS (default: 1)
 	SparkServiceAccount     string // QS_SPARK_SA (default: spark-operator-spark)
 
@@ -156,7 +156,9 @@ func LoadFrom(getenv func(string) string) (*Config, error) {
 
 	// Spark / cluster settings (all optional with defaults).
 	sparkImage := withDefault("QS_SPARK_IMAGE", "quicksense-spark:latest")
-	sparkNamespace := withDefault("QS_SPARK_NAMESPACE", "quicksense")
+	// QS_SPARK_NAMESPACE defaults to "default" (co-located with polaris/minio base stack)
+	// so SparkConnect driver/executor pods resolve short-name DNS (e.g. "polaris", "minio").
+	sparkNamespace := withDefault("QS_SPARK_NAMESPACE", "default")
 	sparkServiceAccount := withDefault("QS_SPARK_SA", "spark-operator-spark")
 	kubeconfigPath := getenv("KUBECONFIG")
 

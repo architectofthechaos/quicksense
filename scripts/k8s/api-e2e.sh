@@ -22,14 +22,22 @@
 #       kubectl port-forward svc/keycloak ${KEYCLOAK_PORT}:${KEYCLOAK_PORT} &
 #       kubectl port-forward svc/trino    ${TRINO_PORT}:${TRINO_PORT} &
 #
+# NAMESPACE NOTE:
+#   The API Deployment, SparkConnect CRs, and the base stack (polaris/minio/trino/
+#   keycloak/postgres) all run in the `default` namespace.  Co-location is required
+#   so SparkConnect driver/executor pods resolve short-name DNS (e.g. "polaris",
+#   "minio") — Polaris advertises short-name REST endpoints, so cross-namespace
+#   pods fail with UnknownHostException.  Live-verified: ROUNDTRIP OK.
+#
 # OPERATOR CONNECT SERVICE NOTE (RECONCILED-AT-LIVE-RUN):
-#   The Spark Operator creates a Service for each SparkConnect CR.
-#   The exact name depends on the operator version and CR name.
-#   Sensible default guess: "<cr-name>-connect" (e.g. "e2e-connect").
+#   The Spark Operator creates a Service for each SparkConnect CR in `default`.
+#   The operator names it "<cr-name>-server" on port 15002 (verified live).
 #   At live run, inspect with:
-#     kubectl get svc -n quicksense
+#     kubectl get svc -n default
 #   and set CONNECT_SVC_OVERRIDE=<actual-name> in the environment if needed.
-#   The script auto-discovers by listing Services that match the cluster name.
+#   The round-trip client (spark_write.py in SC_REMOTE mode) requires the Spark
+#   Connect client deps; the quicksense-spark Dockerfile already bundles them
+#   (pyspark with connect extras), so running the client in that image works.
 
 set -euo pipefail
 
@@ -93,7 +101,7 @@ KEYCLOAK_REALM="${KEYCLOAK_REALM:-quicksense}"
 KEYCLOAK_CLIENT_ID="${KEYCLOAK_CLIENT_ID:-quicksense-api}"
 KEYCLOAK_CLIENT_SECRET="${KEYCLOAK_CLIENT_SECRET:-qs-api-secret}"
 TRINO_PORT="${TRINO_PORT:-8080}"
-API_NS="quicksense"
+API_NS="default"
 API_SVC="quicksense-api"
 API_LOCAL_PORT="8090"
 

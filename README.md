@@ -42,7 +42,7 @@ Use `task ps` for health, `task logs -- polaris` for logs, `task down` to stop c
 | Trino | `http://localhost:8080` | user `quicksense`, no password |
 | Keycloak | `http://localhost:8082` | admin `admin` / `admin` |
 | Keycloak realm | `http://localhost:8082/realms/quicksense` | client `quicksense-api` / `qs-api-secret`, user `qsuser` / `qs-password` |
-| QuickSense API | `kubectl port-forward svc/quicksense-api 8090:8090 -n quicksense` (kind) | Keycloak JWT (see Phase B) |
+| QuickSense API | `kubectl port-forward svc/quicksense-api 8090:8090 -n default` (kind) | Keycloak JWT (see Phase B) |
 
 All defaults are in `.env.example`. `task up` copies it to `.env` if needed. These are development credentials only.
 
@@ -94,7 +94,11 @@ startup.
 The Kubeflow `spark-operator` Helm chart **2.5.1** is installed into the kind cluster:
 
 - Repo: https://kubeflow.github.io/spark-operator
-- Watches the `quicksense` namespace for `SparkConnect` and `SparkApplication` CRs
+- Watches the `default` namespace for `SparkConnect` and `SparkApplication` CRs
+  (co-located with the base stack: postgres/polaris/minio/trino/keycloak)
+- Co-location is required: SparkConnect driver/executor pods must resolve `polaris`
+  and `minio` by short name — Polaris advertises short-name REST endpoints, so
+  pods in a different namespace fail with `UnknownHostException: polaris`
 - An interactive Spark Connect cluster = one `SparkConnect` CR; the operator brings up
   a Spark Connect server reachable at `sc://<cluster-name>-server:15002`
 - Uses the same `quicksense-spark` image as Phase A (one image everywhere)

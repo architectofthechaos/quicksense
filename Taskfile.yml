@@ -103,8 +103,9 @@ tasks:
       - |
         set -a && source .env && set +a
         kubectl config use-context kind-quicksense
-        kubectl create namespace quicksense --dry-run=client -o yaml | kubectl apply -f -
-        kubectl create configmap qs-config --from-env-file=.env -n quicksense --dry-run=client -o yaml | kubectl apply -f -
+        # The API and SparkConnect CRs live in `default` (co-located with the base
+        # stack) so short-name DNS resolves for polaris/minio from driver/executor pods.
+        kubectl create configmap qs-config --from-env-file=.env -n default --dry-run=client -o yaml | kubectl apply -f -
         kubectl create secret generic qs-secrets \
           --from-literal=POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
           --from-literal=POLARIS_CLIENT_SECRET="${POLARIS_CLIENT_SECRET}" \
@@ -112,9 +113,9 @@ tasks:
           --from-literal=KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD}" \
           --from-literal=KEYCLOAK_CLIENT_SECRET="${KEYCLOAK_CLIENT_SECRET}" \
           --from-literal=KEYCLOAK_TEST_PASSWORD="${KEYCLOAK_TEST_PASSWORD}" \
-          -n quicksense --dry-run=client -o yaml | kubectl apply -f -
+          -n default --dry-run=client -o yaml | kubectl apply -f -
         kubectl apply -f deploy/k8s/api.yaml
-        kubectl rollout status deploy/quicksense-api -n quicksense --timeout=120s
+        kubectl rollout status deploy/quicksense-api -n default --timeout=120s
 
   api-e2e:
     desc: Run the API end-to-end test (Keycloak token → catalog/table → cluster → roundtrip → Trino).
