@@ -1,4 +1,6 @@
+"use client";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 const ITEMS = [
   { key: "clusters", label: "Clusters", href: "/app/clusters" },
@@ -7,7 +9,8 @@ const ITEMS = [
 
 const FUTURE = ["Jobs", "SQL editor", "Notebooks", "Agents"];
 
-export function NavSidebar({ active }: { active: "clusters" | "catalog" }) {
+export function NavSidebar() {
+  const pathname = usePathname() ?? "";
   return (
     <nav className="flex w-60 shrink-0 flex-col border-r border-surface-border bg-surface">
       {/* Brand */}
@@ -24,7 +27,7 @@ export function NavSidebar({ active }: { active: "clusters" | "catalog" }) {
       {/* Primary nav */}
       <div className="flex flex-col gap-0.5 p-3">
         {ITEMS.map((it) => {
-          const isActive = active === it.key;
+          const isActive = pathname === it.href || pathname.startsWith(it.href + "/");
           return (
             <Link
               key={it.key}

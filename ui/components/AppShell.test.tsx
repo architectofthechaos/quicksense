@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 vi.mock("next-auth/react", () => ({ signOut: vi.fn(), SessionProvider: ({ children }: any) => children }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/app/clusters" }));
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: any) => (
     <a href={href} {...rest}>
@@ -15,7 +16,7 @@ import { AppShell } from "@/components/AppShell";
 describe("AppShell", () => {
   it("renders nav, username, logout, and children", () => {
     render(
-      <AppShell username="qsuser" active="clusters">
+      <AppShell username="qsuser">
         <div>CONTENT</div>
       </AppShell>,
     );
