@@ -449,8 +449,10 @@ def test_spark_operator_assets_present_and_pinned():
 # ---------------------------------------------------------------------------
 
 
-def test_polaris_manifest_has_mixed_oidc_config():
-    """Polaris Deployment env must contain external OIDC (Keycloak) + mixed-auth keys."""
+def test_polaris_manifest_has_external_oidc_config():
+    """Polaris Deployment env must contain external OIDC (Keycloak) tenant keys and
+    polaris.authentication.type=internal (Polaris 1.5 has no 'mixed'; dev uses internal
+    so root:s3cr3t keeps working; flip to external to enable direct Keycloak-JWT acceptance)."""
     raw = read("deploy/k8s/base/polaris.yaml")
     # OIDC tenant enabled
     assert "quarkus.oidc.tenant-enabled" in raw
@@ -468,8 +470,21 @@ def test_polaris_manifest_has_mixed_oidc_config():
     assert "^polaris_(.*)" in raw
     # Mapper replacement: PRINCIPAL_ROLE:$1
     assert "PRINCIPAL_ROLE:$1" in raw
-    # Internal realm must still be present (mixed mode)
+    # Internal realm name must still be present
     assert "POLARIS" in raw
+    # authentication.type must be present and set to "internal" (Polaris 1.5 — no "mixed").
+    # Use YAML parse to check the env value directly (comments may contain the word "mixed").
+    assert 'polaris.authentication.type' in raw
+    docs = k8s_docs("deploy/k8s/base/polaris.yaml")
+    deploy = next(d for d in docs if d["kind"] == "Deployment")
+    c = deploy["spec"]["template"]["spec"]["containers"][0]
+    auth_env = next(
+        (e for e in c["env"] if e.get("name") == "polaris.authentication.type"), None
+    )
+    assert auth_env is not None, "polaris.authentication.type env var missing"
+    assert auth_env["value"] == "internal", (
+        f"polaris.authentication.type must be 'internal', got {auth_env['value']!r}"
+    )
 
 
 # ---------------------------------------------------------------------------

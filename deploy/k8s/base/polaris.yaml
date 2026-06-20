@@ -132,13 +132,14 @@ spec:
               value: "$(MINIO_ROOT_USER)"
             - name: AWS_SECRET_ACCESS_KEY
               value: "$(MINIO_ROOT_PASSWORD)"
-            # External OIDC — Keycloak as identity provider (mixed realm).
-            # polaris.authentication.type=mixed keeps the internal root:s3cr3t token-broker
-            # working while also accepting Keycloak JWTs validated by the OIDC tenant below.
+            # Auth type: Polaris 1.5 accepts ONLY "internal" or "external" per realm
+            # (no "mixed" value exists — live-verified against Polaris 1.5.0).
+            # Dev uses "internal" so root:s3cr3t keeps working for the API and bootstrap.
+            # To enable direct Keycloak-JWT acceptance, flip to "external"; this disables
+            # root:s3cr3t. The external OIDC tenant below stays CONFIGURED so the flip
+            # is a one-line change when needed (B20).
             # The ^polaris_(.*) mapper turns the Keycloak realm role `polaris_admin` into
             # the Polaris principal role `admin` (PRINCIPAL_ROLE:admin).
-            # NOTE: The exact property keys and the mixed-auth wire-up are reconciled
-            # against live Polaris 1.5 behaviour in B20.
             - { name: quarkus.oidc.tenant-enabled, value: "true" }
             - { name: quarkus.oidc.auth-server-url, value: "http://keycloak:8082/realms/quicksense" }
             - { name: quarkus.oidc.client-id, value: "quicksense-api" }
@@ -146,7 +147,7 @@ spec:
             - { name: polaris.oidc.principal-roles-mapper.type, value: "default" }
             - { name: "polaris.oidc.principal-roles-mapper.mappings[0].regex", value: "^polaris_(.*)" }
             - { name: "polaris.oidc.principal-roles-mapper.mappings[0].replacement", value: "PRINCIPAL_ROLE:$1" }
-            - { name: polaris.authentication.type, value: "mixed" }
+            - { name: polaris.authentication.type, value: "internal" }
             # Dotted Quarkus feature-flag keys — see KNOWN RISK note at top of file.
             - name: 'polaris.features."ALLOW_INSECURE_STORAGE_TYPES"'
               value: "true"
