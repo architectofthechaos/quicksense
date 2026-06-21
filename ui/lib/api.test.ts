@@ -17,9 +17,24 @@ import {
   listTables,
   getTable,
   getTableSample,
+  listNotebooks,
+  createNotebook,
+  getNotebook,
+  saveNotebook,
+  trashNotebook,
+  attachNotebook,
+  listRevisions,
+  saveRevision,
+  restoreRevision,
+  runCell,
+  listNotebookPermissions,
+  putNotebookPermission,
+  deleteNotebookPermission,
+  notebookExportUrl,
+  notebookExport,
   ApiClientError,
 } from "@/lib/api";
-import type { ClusterConfig } from "@/lib/types";
+import type { ClusterConfig, NotebookContent } from "@/lib/types";
 
 function sampleConfig(): ClusterConfig {
   return {
@@ -346,5 +361,243 @@ describe("getTableSample", () => {
       status: 501,
       code: "not_implemented",
     });
+  });
+});
+
+// ── Notebooks (Phase 4d) ─────────────────────────────────────────────────────
+
+const sampleContent: NotebookContent = { cells: [{ id: "c1", type: "code", source: "print(1)" }] };
+
+function nb(over: Record<string, unknown> = {}) {
+  return {
+    id: "n1",
+    name: "Analysis",
+    path: "/Analysis",
+    folder_id: null,
+    attached_cluster_id: null,
+    created_at: "2026-06-20T00:00:00Z",
+    updated_at: "2026-06-20T00:00:00Z",
+    ...over,
+  };
+}
+
+describe("listNotebooks", () => {
+  it("unwraps the notebooks envelope", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ notebooks: [nb(), nb({ id: "n2", name: "Other", path: "/Other" })] }), { status: 200 }),
+    );
+    const out = await listNotebooks("TOK");
+    expect(out).toHaveLength(2);
+    expect(out[0].id).toBe("n1");
+    expect(spy.mock.calls[0][0]).toBe("http://api.test/v1/notebooks");
+  });
+  it("tolerates a missing notebooks array", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    await expect(listNotebooks("TOK")).resolves.toEqual([]);
+  });
+  it("throws ApiClientError on an error envelope", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "store_error", message: "boom" } }), { status: 500 }),
+    );
+    await expect(listNotebooks("TOK")).rejects.toMatchObject({ status: 500, code: "store_error" });
+  });
+});
+
+describe("createNotebook", () => {
+  it("POSTs name/path/folder_id/content and returns the notebook", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(nb({ content: sampleContent })), { status: 201 }),
+    );
+    const out = await createNotebook("TOK", { name: "Analysis", path: "/Analysis", folder_id: null, content: sampleContent });
+    expect(out.id).toBe("n1");
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe("http://api.test/v1/notebooks");
+    expect(init!.method).toBe("POST");
+    expect(JSON.parse(init!.body as string)).toEqual({ name: "Analysis", path: "/Analysis", folder_id: null, content: sampleContent });
+  });
+  it("sends just the name when only a name is given", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify(nb()), { status: 201 }));
+    await createNotebook("TOK", { name: "Bare" });
+    expect(JSON.parse(spy.mock.calls[0][1]!.body as string)).toEqual({ name: "Bare" });
+  });
+});
+
+describe("getNotebook", () => {
+  it("returns the notebook including content", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(nb({ content: sampleContent })), { status: 200 }),
+    );
+    const out = await getNotebook("TOK", "n1");
+    expect(out.content).toEqual(sampleContent);
+    expect(spy.mock.calls[0][0]).toBe("http://api.test/v1/notebooks/n1");
+  });
+  it("encodes the id", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify(nb()), { status: 200 }));
+    await getNotebook("TOK", "a b");
+    expect(spy.mock.calls[0][0]).toBe("http://api.test/v1/notebooks/a%20b");
+  });
+});
+
+describe("saveNotebook", () => {
+  it("PUTs the content and returns the saved notebook", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(nb({ content: sampleContent })), { status: 200 }),
+    );
+    const out = await saveNotebook("TOK", "n1", sampleContent);
+    expect(out.id).toBe("n1");
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe("http://api.test/v1/notebooks/n1");
+    expect(init!.method).toBe("PUT");
+    expect(JSON.parse(init!.body as string)).toEqual({ content: sampleContent });
+  });
+});
+
+describe("trashNotebook", () => {
+  it("treats 204 as success", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    await expect(trashNotebook("TOK", "n1")).resolves.toBeUndefined();
+  });
+  it("throws on a non-204 error", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "not_found", message: "gone" } }), { status: 404 }),
+    );
+    await expect(trashNotebook("TOK", "n1")).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe("attachNotebook", () => {
+  it("POSTs the cluster_id to /attach", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(nb({ attached_cluster_id: "cl1" })), { status: 200 }),
+    );
+    const out = await attachNotebook("TOK", "n1", "cl1");
+    expect(out.attached_cluster_id).toBe("cl1");
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe("http://api.test/v1/notebooks/n1/attach");
+    expect(init!.method).toBe("POST");
+    expect(JSON.parse(init!.body as string)).toEqual({ cluster_id: "cl1" });
+  });
+});
+
+describe("listRevisions", () => {
+  it("unwraps the revisions envelope", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ revisions: [{ id: "r1", message: "init", author: "qsuser", created_at: "2026-06-20T00:00:00Z" }] }),
+        { status: 200 },
+      ),
+    );
+    const out = await listRevisions("TOK", "n1");
+    expect(out).toHaveLength(1);
+    expect(out[0].message).toBe("init");
+  });
+  it("tolerates a missing revisions array", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    await expect(listRevisions("TOK", "n1")).resolves.toEqual([]);
+  });
+});
+
+describe("saveRevision", () => {
+  it("POSTs a message and returns the revision", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ id: "r2", message: "checkpoint", author: "qsuser", created_at: "x" }), { status: 201 }),
+    );
+    const out = await saveRevision("TOK", "n1", "checkpoint");
+    expect(out.id).toBe("r2");
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe("http://api.test/v1/notebooks/n1/revisions");
+    expect(init!.method).toBe("POST");
+    expect(JSON.parse(init!.body as string)).toEqual({ message: "checkpoint" });
+  });
+});
+
+describe("restoreRevision", () => {
+  it("POSTs to the restore path and returns the notebook", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(nb({ content: sampleContent })), { status: 200 }),
+    );
+    const out = await restoreRevision("TOK", "n1", "r1");
+    expect(out.content).toEqual(sampleContent);
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe("http://api.test/v1/notebooks/n1/revisions/r1/restore");
+    expect(init!.method).toBe("POST");
+  });
+});
+
+describe("runCell", () => {
+  it("POSTs to /run and returns the parsed body on success", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ outputs: [{ type: "stdout", text: "hi" }] }), { status: 200 }),
+    );
+    const out = await runCell("TOK", "n1", { cell_id: "c1" });
+    expect(out).toEqual({ outputs: [{ type: "stdout", text: "hi" }] });
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe("http://api.test/v1/notebooks/n1/run");
+    expect(init!.method).toBe("POST");
+    expect(JSON.parse(init!.body as string)).toEqual({ cell_id: "c1" });
+  });
+  it("surfaces a 501 (execution unavailable) as an ApiClientError carrying the code", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "execution_unavailable", message: "broker pending" } }), { status: 501 }),
+    );
+    await expect(runCell("TOK", "n1", {})).rejects.toMatchObject({ status: 501, code: "execution_unavailable" });
+  });
+});
+
+describe("notebook permissions", () => {
+  it("lists permissions, unwrapping the envelope", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ permissions: [{ principal_type: "user", principal_id: "alice", level: "run" }] }), { status: 200 }),
+    );
+    const out = await listNotebookPermissions("TOK", "n1");
+    expect(out).toEqual([{ principal_type: "user", principal_id: "alice", level: "run" }]);
+  });
+  it("tolerates a missing permissions array", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    await expect(listNotebookPermissions("TOK", "n1")).resolves.toEqual([]);
+  });
+  it("PUTs a permission grant", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    await putNotebookPermission("TOK", "n1", { principal_type: "group", principal_id: "data", level: "edit" });
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe("http://api.test/v1/notebooks/n1/permissions");
+    expect(init!.method).toBe("PUT");
+    expect(JSON.parse(init!.body as string)).toEqual({ principal_type: "group", principal_id: "data", level: "edit" });
+  });
+  it("DELETEs a permission with principal query params", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    await deleteNotebookPermission("TOK", "n1", "user", "alice");
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe("http://api.test/v1/notebooks/n1/permissions?principal_type=user&principal_id=alice");
+    expect(init!.method).toBe("DELETE");
+  });
+});
+
+describe("notebookExportUrl", () => {
+  it("builds the BFF export path with the format query", () => {
+    expect(notebookExportUrl("n1", "ipynb")).toBe("/api/notebooks/n1/export?format=ipynb");
+    expect(notebookExportUrl("n1", "py")).toBe("/api/notebooks/n1/export?format=py");
+  });
+  it("encodes the id", () => {
+    expect(notebookExportUrl("a b", "py")).toBe("/api/notebooks/a%20b/export?format=py");
+  });
+});
+
+describe("notebookExport", () => {
+  it("returns the raw upstream Response (does not unwrap) for a file download", async () => {
+    const upstream = new Response("cell 1\ncell 2\n", {
+      status: 200,
+      headers: { "content-type": "text/x-python", "content-disposition": 'attachment; filename="Analysis.py"' },
+    });
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(upstream);
+    const res = await notebookExport("TOK", "n1", "py");
+    expect(res).toBe(upstream);
+    expect(spy.mock.calls[0][0]).toBe("http://api.test/v1/notebooks/n1/export?format=py");
+  });
+  it("throws ApiClientError on a non-ok upstream", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "not_found", message: "gone" } }), { status: 404 }),
+    );
+    await expect(notebookExport("TOK", "n1", "ipynb")).rejects.toBeInstanceOf(ApiClientError);
   });
 });

@@ -9,12 +9,12 @@ type Item = { key: string; label: string; href: string; icon: LucideIcon };
 const ITEMS: Item[] = [
   { key: "clusters", label: "Clusters", href: "/app/clusters", icon: Boxes },
   { key: "catalog", label: "Catalog", href: "/app/catalog", icon: Database },
+  { key: "notebooks", label: "Notebooks", href: "/app/notebooks", icon: NotebookPen },
 ];
 
 const FUTURE: { label: string; icon: LucideIcon }[] = [
   { label: "Jobs", icon: Workflow },
   { label: "SQL editor", icon: SquareTerminal },
-  { label: "Notebooks", icon: NotebookPen },
   { label: "Agents", icon: Bot },
 ];
 

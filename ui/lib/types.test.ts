@@ -7,7 +7,14 @@ import {
   resourceSummary,
   normalizeClusterConfig,
   defaultClusterConfig,
+  newCell,
+  moveCell,
+  normalizeContent,
+  emptyNotebookContent,
+  buildWorkspaceTree,
+  notebookDisplayName,
 } from "@/lib/types";
+import type { NotebookCell, NotebookSummary } from "@/lib/types";
 
 describe("phaseToBadge", () => {
   it("ready flag wins regardless of phase string", () => {
@@ -98,5 +105,153 @@ describe("normalizeClusterConfig", () => {
     const c = normalizeClusterConfig({ name: "x", idle_minutes: "45" as any, env: { A: 1 as any } });
     expect(c.idle_minutes).toBe(45);
     expect(c.env).toEqual({ A: "1" });
+  });
+});
+
+// ── Notebooks (Phase 4d) ─────────────────────────────────────────────────────
+
+describe("newCell", () => {
+  it("makes a code cell with a unique id and empty source by default", () => {
+    const a = newCell("code");
+    const b = newCell("code");
+    expect(a.type).toBe("code");
+    expect(a.source).toBe("");
+    expect(a.id).toBeTruthy();
+    expect(a.id).not.toBe(b.id);
+  });
+  it("makes a markdown cell carrying the given source", () => {
+    const c = newCell("markdown", "# Title");
+    expect(c.type).toBe("markdown");
+    expect(c.source).toBe("# Title");
+  });
+});
+
+describe("moveCell", () => {
+  const cells: NotebookCell[] = [
+    { id: "a", type: "code", source: "1" },
+    { id: "b", type: "code", source: "2" },
+    { id: "c", type: "code", source: "3" },
+  ];
+  it("moves a cell up", () => {
+    const out = moveCell(cells, 1, "up");
+    expect(out.map((c) => c.id)).toEqual(["b", "a", "c"]);
+  });
+  it("moves a cell down", () => {
+    const out = moveCell(cells, 1, "down");
+    expect(out.map((c) => c.id)).toEqual(["a", "c", "b"]);
+  });
+  it("clamps at the boundaries (no-op moving the first cell up)", () => {
+    expect(moveCell(cells, 0, "up").map((c) => c.id)).toEqual(["a", "b", "c"]);
+    expect(moveCell(cells, 2, "down").map((c) => c.id)).toEqual(["a", "b", "c"]);
+  });
+  it("returns a new array (does not mutate the input)", () => {
+    const out = moveCell(cells, 1, "up");
+    expect(out).not.toBe(cells);
+    expect(cells.map((c) => c.id)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("normalizeContent", () => {
+  it("returns a single empty code cell for null/empty/missing content", () => {
+    expect(normalizeContent(null).cells).toHaveLength(1);
+    expect(normalizeContent(null).cells[0].type).toBe("code");
+    expect(normalizeContent({ cells: [] }).cells).toHaveLength(1);
+    expect(normalizeContent({} as any).cells).toHaveLength(1);
+  });
+  it("assigns ids to cells that lack them and preserves source/type", () => {
+    const out = normalizeContent({ cells: [{ type: "markdown", source: "hi" } as any, { type: "code", source: "x" } as any] });
+    expect(out.cells).toHaveLength(2);
+    expect(out.cells[0].id).toBeTruthy();
+    expect(out.cells[1].id).toBeTruthy();
+    expect(out.cells[0].id).not.toBe(out.cells[1].id);
+    expect(out.cells[0]).toMatchObject({ type: "markdown", source: "hi" });
+  });
+  it("coerces an unknown cell type to code and a missing source to empty string", () => {
+    const out = normalizeContent({ cells: [{ type: "weird" as any, source: undefined as any }] });
+    expect(out.cells[0].type).toBe("code");
+    expect(out.cells[0].source).toBe("");
+  });
+  it("keeps an existing id stable", () => {
+    const out = normalizeContent({ cells: [{ id: "keep", type: "code", source: "1" }] });
+    expect(out.cells[0].id).toBe("keep");
+  });
+});
+
+describe("emptyNotebookContent", () => {
+  it("is one empty code cell", () => {
+    const c = emptyNotebookContent();
+    expect(c.cells).toHaveLength(1);
+    expect(c.cells[0].type).toBe("code");
+    expect(c.cells[0].source).toBe("");
+    expect(c.cells[0].id).toBeTruthy();
+  });
+});
+
+function summary(id: string, path: string): NotebookSummary {
+  return {
+    id,
+    name: path.split("/").filter(Boolean).pop() ?? path,
+    path,
+    folder_id: null,
+    attached_cluster_id: null,
+    created_at: "2026-06-20T00:00:00Z",
+    updated_at: "2026-06-20T00:00:00Z",
+  };
+}
+
+describe("buildWorkspaceTree", () => {
+  it("groups notebooks under folders derived from their path", () => {
+    const tree = buildWorkspaceTree([
+      summary("n1", "/Reports/Q1"),
+      summary("n2", "/Reports/Q2"),
+      summary("n3", "/scratch"),
+    ]);
+    // top level: folder "Reports" + notebook "scratch"
+    const labels = tree.map((n) => n.label);
+    expect(labels).toContain("Reports");
+    expect(labels).toContain("scratch");
+    const reports = tree.find((n) => n.label === "Reports")!;
+    expect(reports.kind).toBe("folder");
+    expect(reports.children?.map((c) => c.label).sort()).toEqual(["Q1", "Q2"]);
+    expect(reports.children?.every((c) => c.kind === "notebook")).toBe(true);
+  });
+
+  it("sorts folders before notebooks, each alphabetically", () => {
+    const tree = buildWorkspaceTree([
+      summary("n1", "/zeta"),
+      summary("n2", "/alpha"),
+      summary("n3", "/Folder/x"),
+    ]);
+    expect(tree.map((n) => n.label)).toEqual(["Folder", "alpha", "zeta"]);
+  });
+
+  it("handles a path with no leading slash and a bare name", () => {
+    const tree = buildWorkspaceTree([summary("n1", "Loose"), summary("n2", "/Bare")]);
+    expect(tree.map((n) => n.label).sort()).toEqual(["Bare", "Loose"]);
+    expect(tree.every((n) => n.kind === "notebook")).toBe(true);
+  });
+
+  it("attaches the notebook id to leaf nodes", () => {
+    const tree = buildWorkspaceTree([summary("n1", "/A/file")]);
+    const leaf = tree[0].children![0];
+    expect(leaf.notebookId).toBe("n1");
+  });
+
+  it("returns an empty array for no notebooks", () => {
+    expect(buildWorkspaceTree([])).toEqual([]);
+  });
+});
+
+describe("notebookDisplayName", () => {
+  it("prefers the explicit name", () => {
+    expect(notebookDisplayName(summary("n1", "/A/Report"))).toBe("Report");
+  });
+  it("derives from the path tail when name is blank", () => {
+    const s = { ...summary("n1", "/A/Derived"), name: "" };
+    expect(notebookDisplayName(s)).toBe("Derived");
+  });
+  it("falls back to Untitled when both are empty", () => {
+    const s = { ...summary("n1", ""), name: "" };
+    expect(notebookDisplayName(s)).toBe("Untitled");
   });
 });

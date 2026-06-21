@@ -13,6 +13,15 @@ import type {
   TablesResponse,
   TableDetail,
   TableSample,
+  Notebook,
+  NotebookSummary,
+  NotebooksResponse,
+  NotebookContent,
+  Revision,
+  RevisionsResponse,
+  Permission,
+  PermissionsResponse,
+  PrincipalType,
   ApiError,
 } from "@/lib/types";
 
@@ -206,4 +215,136 @@ export async function getTableSample(
   );
   if (!res.ok) throw await asError(res);
   return (await res.json()) as TableSample;
+}
+
+// ── Notebooks (Phase 4d) ───────────────────────────────────────────────────────
+// Workspace notebooks: list/CRUD, attach-to-cluster, version history, run (cell
+// execution — currently 501), object-level share permissions, and export. Each
+// fn maps 1:1 to a Go endpoint under /v1/notebooks and unwraps its envelope; the
+// browser reaches these only through the BFF route handlers.
+
+const nbPath = (id: string) => `/v1/notebooks/${encodeURIComponent(id)}`;
+
+export async function listNotebooks(token: string): Promise<NotebookSummary[]> {
+  const res = await apiFetch("/v1/notebooks", token);
+  if (!res.ok) throw await asError(res);
+  const body = (await res.json()) as NotebooksResponse;
+  return body.notebooks ?? [];
+}
+
+// CreateNotebookInput mirrors the POST body. Only `name` is required; `path`,
+// `folder_id` and starting `content` are optional. Undefined fields are omitted
+// from the JSON so the API can apply its defaults.
+export type CreateNotebookInput = {
+  name: string;
+  path?: string;
+  folder_id?: string | null;
+  content?: NotebookContent;
+};
+
+export async function createNotebook(token: string, input: CreateNotebookInput): Promise<Notebook> {
+  const body: Record<string, unknown> = { name: input.name };
+  if (input.path !== undefined) body.path = input.path;
+  if (input.folder_id !== undefined) body.folder_id = input.folder_id;
+  if (input.content !== undefined) body.content = input.content;
+  const res = await apiFetch("/v1/notebooks", token, { method: "POST", body: JSON.stringify(body) });
+  if (!res.ok) throw await asError(res);
+  return (await res.json()) as Notebook;
+}
+
+export async function getNotebook(token: string, id: string): Promise<Notebook> {
+  const res = await apiFetch(nbPath(id), token);
+  if (!res.ok) throw await asError(res);
+  return (await res.json()) as Notebook;
+}
+
+export async function saveNotebook(token: string, id: string, content: NotebookContent): Promise<Notebook> {
+  const res = await apiFetch(nbPath(id), token, { method: "PUT", body: JSON.stringify({ content }) });
+  if (!res.ok) throw await asError(res);
+  return (await res.json()) as Notebook;
+}
+
+export async function trashNotebook(token: string, id: string): Promise<void> {
+  const res = await apiFetch(nbPath(id), token, { method: "DELETE" });
+  if (!res.ok && res.status !== 204) throw await asError(res);
+}
+
+export async function attachNotebook(token: string, id: string, clusterId: string): Promise<Notebook> {
+  const res = await apiFetch(`${nbPath(id)}/attach`, token, {
+    method: "POST",
+    body: JSON.stringify({ cluster_id: clusterId }),
+  });
+  if (!res.ok) throw await asError(res);
+  return (await res.json()) as Notebook;
+}
+
+export async function listRevisions(token: string, id: string): Promise<Revision[]> {
+  const res = await apiFetch(`${nbPath(id)}/revisions`, token);
+  if (!res.ok) throw await asError(res);
+  const body = (await res.json()) as RevisionsResponse;
+  return body.revisions ?? [];
+}
+
+export async function saveRevision(token: string, id: string, message: string): Promise<Revision> {
+  const res = await apiFetch(`${nbPath(id)}/revisions`, token, { method: "POST", body: JSON.stringify({ message }) });
+  if (!res.ok) throw await asError(res);
+  return (await res.json()) as Revision;
+}
+
+export async function restoreRevision(token: string, id: string, rev: string): Promise<Notebook> {
+  const res = await apiFetch(`${nbPath(id)}/revisions/${encodeURIComponent(rev)}/restore`, token, { method: "POST" });
+  if (!res.ok) throw await asError(res);
+  return (await res.json()) as Notebook;
+}
+
+// RunRequest selects what to execute. An empty body runs all cells; `cell_id`
+// runs a single cell. The endpoint is currently 501 (Spark-Connect broker
+// pending) — callers should catch the ApiClientError (code "execution_unavailable")
+// and surface a graceful "execution not yet available" state.
+export type RunRequest = { cell_id?: string };
+
+export async function runCell(token: string, id: string, body: RunRequest): Promise<unknown> {
+  const res = await apiFetch(`${nbPath(id)}/run`, token, { method: "POST", body: JSON.stringify(body) });
+  if (!res.ok) throw await asError(res);
+  return res.json();
+}
+
+export async function listNotebookPermissions(token: string, id: string): Promise<Permission[]> {
+  const res = await apiFetch(`${nbPath(id)}/permissions`, token);
+  if (!res.ok) throw await asError(res);
+  const body = (await res.json()) as PermissionsResponse;
+  return body.permissions ?? [];
+}
+
+export async function putNotebookPermission(token: string, id: string, perm: Permission): Promise<void> {
+  const res = await apiFetch(`${nbPath(id)}/permissions`, token, { method: "PUT", body: JSON.stringify(perm) });
+  if (!res.ok && res.status !== 204) throw await asError(res);
+}
+
+export async function deleteNotebookPermission(
+  token: string,
+  id: string,
+  principalType: PrincipalType,
+  principalId: string,
+): Promise<void> {
+  const qs = `principal_type=${encodeURIComponent(principalType)}&principal_id=${encodeURIComponent(principalId)}`;
+  const res = await apiFetch(`${nbPath(id)}/permissions?${qs}`, token, { method: "DELETE" });
+  if (!res.ok && res.status !== 204) throw await asError(res);
+}
+
+// notebookExportUrl builds the *browser-facing* BFF export URL (not the upstream
+// path). The export route streams the upstream file + content-disposition; the
+// UI just points a download link at this.
+export function notebookExportUrl(id: string, format: "ipynb" | "py"): string {
+  return `/api/notebooks/${encodeURIComponent(id)}/export?format=${format}`;
+}
+
+// notebookExport returns the raw upstream Response so the BFF export route can
+// stream the file body + content-disposition straight through. Unlike the other
+// fns it does not unwrap JSON — the body is a file download. Throws on a non-ok
+// status so the route can map it to an error envelope.
+export async function notebookExport(token: string, id: string, format: "ipynb" | "py"): Promise<Response> {
+  const res = await apiFetch(`${nbPath(id)}/export?format=${encodeURIComponent(format)}`, token);
+  if (!res.ok) throw await asError(res);
+  return res;
 }

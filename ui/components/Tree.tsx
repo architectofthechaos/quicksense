@@ -1,10 +1,11 @@
 "use client";
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";
-import { ChevronRight, Database, Folder, FolderOpen, Table2, type LucideIcon } from "lucide-react";
+import { ChevronRight, Database, Folder, FolderOpen, Table2, FileCode, type LucideIcon } from "lucide-react";
 
 // A node kind drives the leading icon and a11y semantics. Kinds map to the
-// catalog hierarchy but the component itself is generic.
-export type TreeNodeKind = "catalog" | "namespace" | "table";
+// catalog hierarchy (catalog/namespace/table) and the notebooks workspace
+// (folder/notebook), but the component itself is generic.
+export type TreeNodeKind = "catalog" | "namespace" | "table" | "folder" | "notebook";
 
 export type TreeNode = {
   id: string;
@@ -19,6 +20,8 @@ const KIND_ICON: Record<TreeNodeKind, { collapsed: LucideIcon; expanded: LucideI
   catalog: { collapsed: Database, expanded: Database },
   namespace: { collapsed: Folder, expanded: FolderOpen },
   table: { collapsed: Table2, expanded: Table2 },
+  folder: { collapsed: Folder, expanded: FolderOpen },
+  notebook: { collapsed: FileCode, expanded: FileCode },
 };
 
 // Per-node lazy-load state, keyed by node id. Cached so collapse/re-expand does

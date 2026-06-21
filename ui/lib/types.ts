@@ -212,3 +212,179 @@ export function resourceSummary(r: ResourceSpec | undefined): string {
   if (!r) return "—";
   return `${r.cpu_request || "—"}→${r.cpu_limit || "—"} · ${r.memory_request || "—"}→${r.memory_limit || "—"}`;
 }
+
+// ── Notebooks (Phase 4d) ─────────────────────────────────────────────────────
+// Notebook source lives as JSONB on the notebook: a list of typed cells. The
+// browser holds the editable content; saves PUT the whole {cells:[]} back. All
+// reads/writes route through the Go API via the BFF (browser never touches the
+// data plane).
+
+export type CellType = "code" | "markdown";
+
+// One notebook cell. `id` is a client-stable identifier used as a React key and
+// for reorder/run targeting; the API persists it as part of the JSONB content.
+export type NotebookCell = { id: string; type: CellType; source: string };
+
+// The persisted notebook body. The contract is `{cells:[{type,source}]}`; we
+// additionally carry a per-cell `id` for stable UI keying.
+export type NotebookContent = { cells: NotebookCell[] };
+
+// A notebook as returned by list/CRUD endpoints. List responses omit `content`;
+// GET /{id}, POST and PUT include it. `path` is the workspace path; `folder_id`
+// and `attached_cluster_id` may be null.
+export type Notebook = {
+  id: string;
+  name: string;
+  path: string;
+  folder_id: string | null;
+  attached_cluster_id: string | null;
+  created_at: string;
+  updated_at: string;
+  content?: NotebookContent;
+};
+
+// A lightweight summary used for the workspace list/tree (no content).
+export type NotebookSummary = Omit<Notebook, "content">;
+
+export type NotebooksResponse = { notebooks: NotebookSummary[] };
+
+// One saved revision (version-history entry). `snapshot` content is not returned
+// in the list; restore re-applies it server-side.
+export type Revision = {
+  id: string;
+  message: string;
+  author: string;
+  created_at: string;
+};
+
+export type RevisionsResponse = { revisions: Revision[] };
+
+// ── Run output framing (SSE) ─────────────────────────────────────────────────
+// A run emits frames; the broker/API contract (design D5) is:
+//   {type:'stdout', text}
+//   {type:'result', columns:[], rows:[][]}
+//   {type:'error', ename, evalue, traceback:[]}
+// Execution is currently 501 (broker pending); the UI tolerates that and these
+// shapes describe what a successful run *would* return so the renderer is ready.
+export type RunOutput =
+  | { type: "stdout"; text: string }
+  | { type: "result"; columns: string[]; rows: unknown[][] }
+  | { type: "error"; ename: string; evalue: string; traceback: string[] };
+
+// Permission level for object sharing (mirrors the 4e permissions contract).
+export type PermissionLevel = "view" | "run" | "edit" | "manage";
+export type PrincipalType = "user" | "group";
+export type Permission = {
+  principal_type: PrincipalType;
+  principal_id: string;
+  level: PermissionLevel;
+};
+export type PermissionsResponse = { permissions: Permission[] };
+
+let cellSeq = 0;
+// newCell mints a fresh cell with a process-unique id. The id only needs to be
+// stable within a session (it is a React key + reorder handle), so a monotonic
+// counter combined with a random suffix is sufficient and test-deterministic.
+export function newCell(type: CellType, source = ""): NotebookCell {
+  cellSeq += 1;
+  const rand = Math.random().toString(36).slice(2, 8);
+  return { id: `cell-${cellSeq}-${rand}`, type, source };
+}
+
+// moveCell returns a new cell array with the cell at `index` shifted one slot in
+// `dir`. Out-of-range moves (first up / last down) are no-ops. Never mutates the
+// input — callers can pass it straight to setState.
+export function moveCell(cells: NotebookCell[], index: number, dir: "up" | "down"): NotebookCell[] {
+  const target = dir === "up" ? index - 1 : index + 1;
+  if (index < 0 || index >= cells.length || target < 0 || target >= cells.length) {
+    return cells.slice();
+  }
+  const out = cells.slice();
+  [out[index], out[target]] = [out[target], out[index]];
+  return out;
+}
+
+// normalizeContent coerces an arbitrary (possibly partial / server-shaped)
+// content blob into a complete NotebookContent: fills cell ids, defaults an
+// unknown type to "code" and a missing source to "", and guarantees at least one
+// cell so the editor always has something to render. The input is intentionally
+// loose — it's the defensive boundary for whatever the API returns.
+export function normalizeContent(
+  input: { cells?: Array<Partial<NotebookCell>> } | null | undefined,
+): NotebookContent {
+  const rawCells = Array.isArray(input?.cells) ? input!.cells : [];
+  const cells: NotebookCell[] = rawCells.map((c) => {
+    const type: CellType = c?.type === "markdown" ? "markdown" : "code";
+    const source = typeof c?.source === "string" ? c.source : "";
+    const id = typeof c?.id === "string" && c.id.trim() ? c.id : newCell(type).id;
+    return { id, type, source };
+  });
+  if (cells.length === 0) return emptyNotebookContent();
+  return { cells };
+}
+
+// emptyNotebookContent is the starting body for a brand-new notebook: a single
+// empty code cell.
+export function emptyNotebookContent(): NotebookContent {
+  return { cells: [newCell("code")] };
+}
+
+// notebookDisplayName resolves the label to show for a notebook: its explicit
+// name, else the tail of its path, else "Untitled".
+export function notebookDisplayName(n: Pick<NotebookSummary, "name" | "path">): string {
+  if (n.name && n.name.trim()) return n.name.trim();
+  const tail = (n.path ?? "").split("/").filter(Boolean).pop();
+  return tail && tail.trim() ? tail : "Untitled";
+}
+
+// WorkspaceNode is the display tree the workspace pane renders. Folders are
+// derived from notebook paths (the API stores a flat notebook list with paths);
+// `notebookId` is set on notebook leaves so a selection maps back to the record.
+export type WorkspaceNode = {
+  id: string; // stable display id (folder path or "nb:<id>")
+  label: string;
+  kind: "folder" | "notebook";
+  notebookId?: string;
+  children?: WorkspaceNode[];
+};
+
+// buildWorkspaceTree groups a flat notebook list into a folder/notebook tree by
+// splitting each notebook's path on "/". A path like "/Reports/Q1" places a
+// notebook "Q1" inside a folder "Reports"; a bare "/scratch" is a top-level
+// notebook. Folders sort before notebooks, each alphabetically (case-insensitive).
+export function buildWorkspaceTree(notebooks: NotebookSummary[]): WorkspaceNode[] {
+  type Dir = { folders: Map<string, Dir>; notebooks: WorkspaceNode[] };
+  const root: Dir = { folders: new Map(), notebooks: [] };
+
+  for (const n of notebooks) {
+    const segs = (n.path ?? "").split("/").filter(Boolean);
+    const name = notebookDisplayName(n);
+    const folderSegs = segs.slice(0, -1); // last segment is the notebook itself
+    let dir = root;
+    for (const seg of folderSegs) {
+      let child = dir.folders.get(seg);
+      if (!child) {
+        child = { folders: new Map(), notebooks: [] };
+        dir.folders.set(seg, child);
+      }
+      dir = child;
+    }
+    dir.notebooks.push({ id: `nb:${n.id}`, label: name, kind: "notebook", notebookId: n.id });
+  }
+
+  const byLabel = (a: WorkspaceNode, b: WorkspaceNode) =>
+    a.label.toLowerCase().localeCompare(b.label.toLowerCase());
+
+  const toNodes = (dir: Dir, prefix: string): WorkspaceNode[] => {
+    const folderNodes: WorkspaceNode[] = Array.from(dir.folders.entries())
+      .map(([seg, child]) => {
+        const path = `${prefix}/${seg}`;
+        return { id: `dir:${path}`, label: seg, kind: "folder" as const, children: toNodes(child, path) };
+      })
+      .sort(byLabel);
+    const notebookNodes = dir.notebooks.slice().sort(byLabel);
+    return [...folderNodes, ...notebookNodes];
+  };
+
+  return toNodes(root, "");
+}
