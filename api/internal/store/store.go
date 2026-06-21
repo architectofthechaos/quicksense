@@ -56,6 +56,39 @@ type CreateClusterParams struct {
 	Config      json.RawMessage // full create config, persisted for lifecycle re-rendering
 }
 
+// Notebook is a workspace notebook (source + metadata) stored in Postgres (4d).
+type Notebook struct {
+	ID                string
+	FolderID          string
+	Name              string
+	Path              string
+	Owner             string
+	Content           json.RawMessage // {"cells":[...]}
+	AttachedClusterID string
+	TrashedAt         *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+// CreateNotebookParams carries the input to create a notebook.
+type CreateNotebookParams struct {
+	Name     string
+	Path     string
+	Owner    string
+	FolderID string
+	Content  json.RawMessage
+}
+
+// NotebookRevision is a saved snapshot of a notebook's content (version history).
+type NotebookRevision struct {
+	ID         string
+	NotebookID string
+	Snapshot   json.RawMessage
+	Message    string
+	Author     string
+	CreatedAt  time.Time
+}
+
 // ErrNotFound is returned when a requested resource does not exist in the store.
 var ErrNotFound = errors.New("not found")
 
@@ -86,4 +119,15 @@ type Store interface {
 	SetClusterDesiredState(ctx context.Context, id, desiredState string) (*Cluster, error)
 	SetClusterPinned(ctx context.Context, id string, pinned bool) (*Cluster, error)
 	TouchClusterActivity(ctx context.Context, id string) error
+
+	// Notebook methods (4d).
+	CreateNotebook(ctx context.Context, p CreateNotebookParams) (*Notebook, error)
+	GetNotebook(ctx context.Context, id string) (*Notebook, error)
+	ListNotebooks(ctx context.Context) ([]Notebook, error)
+	UpdateNotebookContent(ctx context.Context, id string, content json.RawMessage) (*Notebook, error)
+	AttachNotebookCluster(ctx context.Context, id, clusterID string) (*Notebook, error)
+	TrashNotebook(ctx context.Context, id string) error
+	CreateRevision(ctx context.Context, notebookID string, snapshot json.RawMessage, message, author string) (*NotebookRevision, error)
+	ListRevisions(ctx context.Context, notebookID string) ([]NotebookRevision, error)
+	GetRevision(ctx context.Context, revID string) (*NotebookRevision, error)
 }

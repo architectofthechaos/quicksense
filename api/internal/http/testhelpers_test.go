@@ -105,13 +105,19 @@ func (f *fakeTrino) Sample(_ context.Context, catalog, schema, table string, lim
 // ---------------------------------------------------------------------------
 
 type fakeStore struct {
-	mu       sync.Mutex
-	clusters map[string]*store.Cluster
-	nextErr  error // if set, the next mutating call returns this error
+	mu        sync.Mutex
+	clusters  map[string]*store.Cluster
+	notebooks map[string]*store.Notebook
+	revisions map[string]*store.NotebookRevision
+	nextErr   error // if set, the next mutating call returns this error
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{clusters: make(map[string]*store.Cluster)}
+	return &fakeStore{
+		clusters:  make(map[string]*store.Cluster),
+		notebooks: make(map[string]*store.Notebook),
+		revisions: make(map[string]*store.NotebookRevision),
+	}
 }
 
 func (f *fakeStore) Ping(_ context.Context) error { return nil }
@@ -244,6 +250,119 @@ func (f *fakeStore) TouchClusterActivity(_ context.Context, id string) error {
 	}
 	c.LastActivityAt = time.Now()
 	return nil
+}
+
+// ---- notebook fakes (4d) ----
+
+func (f *fakeStore) CreateNotebook(_ context.Context, p store.CreateNotebookParams) (*store.Notebook, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	content := p.Content
+	if len(content) == 0 {
+		content = json.RawMessage(`{"cells":[]}`)
+	}
+	id := fmt.Sprintf("nb-%d", len(f.notebooks)+1)
+	n := &store.Notebook{
+		ID: id, FolderID: p.FolderID, Name: p.Name, Path: p.Path, Owner: p.Owner,
+		Content: content, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	f.notebooks[id] = n
+	cp := *n
+	return &cp, nil
+}
+
+func (f *fakeStore) GetNotebook(_ context.Context, id string) (*store.Notebook, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n, ok := f.notebooks[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	cp := *n
+	return &cp, nil
+}
+
+func (f *fakeStore) ListNotebooks(_ context.Context) ([]store.Notebook, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]store.Notebook, 0, len(f.notebooks))
+	for _, n := range f.notebooks {
+		if n.TrashedAt == nil {
+			out = append(out, *n)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) UpdateNotebookContent(_ context.Context, id string, content json.RawMessage) (*store.Notebook, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n, ok := f.notebooks[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	n.Content = content
+	cp := *n
+	return &cp, nil
+}
+
+func (f *fakeStore) AttachNotebookCluster(_ context.Context, id, clusterID string) (*store.Notebook, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n, ok := f.notebooks[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	n.AttachedClusterID = clusterID
+	cp := *n
+	return &cp, nil
+}
+
+func (f *fakeStore) TrashNotebook(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n, ok := f.notebooks[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	now := time.Now()
+	n.TrashedAt = &now
+	return nil
+}
+
+func (f *fakeStore) CreateRevision(_ context.Context, notebookID string, snapshot json.RawMessage, message, author string) (*store.NotebookRevision, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := fmt.Sprintf("rev-%d", len(f.revisions)+1)
+	r := &store.NotebookRevision{
+		ID: id, NotebookID: notebookID, Snapshot: snapshot, Message: message, Author: author, CreatedAt: time.Now(),
+	}
+	f.revisions[id] = r
+	cp := *r
+	return &cp, nil
+}
+
+func (f *fakeStore) ListRevisions(_ context.Context, notebookID string) ([]store.NotebookRevision, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]store.NotebookRevision, 0)
+	for _, r := range f.revisions {
+		if r.NotebookID == notebookID {
+			out = append(out, *r)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) GetRevision(_ context.Context, revID string) (*store.NotebookRevision, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r, ok := f.revisions[revID]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	cp := *r
+	return &cp, nil
 }
 
 // seed adds a cluster directly to the fake store (for test setup).

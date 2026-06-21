@@ -235,6 +235,122 @@ func (s *PgStore) DeleteCluster(ctx context.Context, id string) error {
 	return nil
 }
 
+// ---- Notebook methods (4d) ----
+
+const notebookColumns = `id, COALESCE(folder_id::text, ''), name, path, owner, content,
+	COALESCE(attached_cluster_id::text, ''), trashed_at, created_at, updated_at`
+
+func scanNotebook(row pgx.Row) (*Notebook, error) {
+	var n Notebook
+	if err := row.Scan(
+		&n.ID, &n.FolderID, &n.Name, &n.Path, &n.Owner, &n.Content,
+		&n.AttachedClusterID, &n.TrashedAt, &n.CreatedAt, &n.UpdatedAt,
+	); err != nil {
+		return nil, mapPgError(err)
+	}
+	return &n, nil
+}
+
+const revisionColumns = `id, notebook_id, snapshot, message, author, created_at`
+
+func scanRevision(row pgx.Row) (*NotebookRevision, error) {
+	var r NotebookRevision
+	if err := row.Scan(&r.ID, &r.NotebookID, &r.Snapshot, &r.Message, &r.Author, &r.CreatedAt); err != nil {
+		return nil, mapPgError(err)
+	}
+	return &r, nil
+}
+
+// CreateNotebook inserts a notebook (empty cells by default).
+func (s *PgStore) CreateNotebook(ctx context.Context, p CreateNotebookParams) (*Notebook, error) {
+	q := `INSERT INTO notebooks (folder_id, name, path, owner, content)
+		VALUES (NULLIF($1, '')::uuid, $2, $3, $4, COALESCE($5::jsonb, '{"cells":[]}'::jsonb))
+		RETURNING ` + notebookColumns
+	return scanNotebook(s.pool.QueryRow(ctx, q, p.FolderID, p.Name, p.Path, p.Owner, jsonbArg(p.Content)))
+}
+
+// GetNotebook returns a notebook by ID (ErrNotFound if absent).
+func (s *PgStore) GetNotebook(ctx context.Context, id string) (*Notebook, error) {
+	q := `SELECT ` + notebookColumns + ` FROM notebooks WHERE id = $1`
+	return scanNotebook(s.pool.QueryRow(ctx, q, id))
+}
+
+// ListNotebooks returns all non-trashed notebooks ordered by path.
+func (s *PgStore) ListNotebooks(ctx context.Context) ([]Notebook, error) {
+	q := `SELECT ` + notebookColumns + ` FROM notebooks WHERE trashed_at IS NULL ORDER BY path ASC`
+	rows, err := s.pool.Query(ctx, q)
+	if err != nil {
+		return nil, mapPgError(err)
+	}
+	defer rows.Close()
+	var result []Notebook
+	for rows.Next() {
+		n, err := scanNotebook(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *n)
+	}
+	return result, rows.Err()
+}
+
+// UpdateNotebookContent replaces the cell content (on save).
+func (s *PgStore) UpdateNotebookContent(ctx context.Context, id string, content json.RawMessage) (*Notebook, error) {
+	q := `UPDATE notebooks SET content = $2::jsonb, updated_at = now() WHERE id = $1 RETURNING ` + notebookColumns
+	return scanNotebook(s.pool.QueryRow(ctx, q, id, string(content)))
+}
+
+// AttachNotebookCluster sets (or clears, when empty) the attached cluster.
+func (s *PgStore) AttachNotebookCluster(ctx context.Context, id, clusterID string) (*Notebook, error) {
+	q := `UPDATE notebooks SET attached_cluster_id = NULLIF($2, '')::uuid, updated_at = now()
+		WHERE id = $1 RETURNING ` + notebookColumns
+	return scanNotebook(s.pool.QueryRow(ctx, q, id, clusterID))
+}
+
+// TrashNotebook soft-deletes a notebook.
+func (s *PgStore) TrashNotebook(ctx context.Context, id string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE notebooks SET trashed_at = now() WHERE id = $1`, id)
+	if err != nil {
+		return mapPgError(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// CreateRevision saves a content snapshot for version history.
+func (s *PgStore) CreateRevision(ctx context.Context, notebookID string, snapshot json.RawMessage, message, author string) (*NotebookRevision, error) {
+	q := `INSERT INTO notebook_revisions (notebook_id, snapshot, message, author)
+		VALUES ($1::uuid, $2::jsonb, $3, $4) RETURNING ` + revisionColumns
+	return scanRevision(s.pool.QueryRow(ctx, q, notebookID, string(snapshot), message, author))
+}
+
+// ListRevisions returns a notebook's revisions, newest first.
+func (s *PgStore) ListRevisions(ctx context.Context, notebookID string) ([]NotebookRevision, error) {
+	q := `SELECT ` + revisionColumns + ` FROM notebook_revisions WHERE notebook_id = $1 ORDER BY created_at DESC`
+	rows, err := s.pool.Query(ctx, q, notebookID)
+	if err != nil {
+		return nil, mapPgError(err)
+	}
+	defer rows.Close()
+	var result []NotebookRevision
+	for rows.Next() {
+		r, err := scanRevision(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *r)
+	}
+	return result, rows.Err()
+}
+
+// GetRevision returns a single revision by ID (for restore).
+func (s *PgStore) GetRevision(ctx context.Context, revID string) (*NotebookRevision, error) {
+	q := `SELECT ` + revisionColumns + ` FROM notebook_revisions WHERE id = $1`
+	return scanRevision(s.pool.QueryRow(ctx, q, revID))
+}
+
 // mapPgError translates pgx-level errors to store-level sentinel errors.
 //
 //   - pgx.ErrNoRows → ErrNotFound
