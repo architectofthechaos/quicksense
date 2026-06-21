@@ -10,8 +10,8 @@
 ## 1. Overall progress
 
 ```
-SPEC-004  ███████████████░░░░░  ~75%
-4a Login ✅100%  4b Clusters ✅100%  4c Catalog ✅100%  4d Notebooks ◑~60%  4e AuthZ ◑~40%
+SPEC-004  █████████████████░░░  ~85%
+4a Login ✅100%  4b Clusters ✅100%  4c Catalog ✅100%  4d Notebooks ◑~75%  4e AuthZ ◑~60%
 ```
 
 | Phase | State | Evidence |
@@ -20,8 +20,8 @@ SPEC-004  ███████████████░░░░░  ~75%
 | **4a** Branded Keycloak login + punch-list | ✅ **Complete, verified live** | `b52a3a6` |
 | **4b** Production clusters (backend + UI) | ✅ **Complete** | `7d6b5a2` `7e921ae` `61bf59f` `27b7a70` |
 | **4c** Catalog browser (backend + UI) | ✅ **Complete** (read-first) | `281ba04` `c67a547` `5e9de68` |
-| **4d** Notebooks | ◑ **Backend done; UI in progress; execution deferred** | `0f4691f` `8c241a4` `497d468` `7ff995e` |
-| **4e** AuthN/AuthZ | ◑ **Authz model + permission store/API done; enforcement+identity+UI pending** | `4a5612e` `d5597cb` |
+| **4d** Notebooks | ◑ **Backend + UI done** (tree, CodeMirror editor, versions, share, export, ownership); **execution broker deferred** (`/run`=501) | `0f4691f` `8c241a4` `497d468` `7ff995e` `2302bd4` `332f191` |
+| **4e** AuthN/AuthZ | ◑ **Authz model + permission store/API + notebook enforcement + Permissions UI done**; cluster enforcement / per-user identity / Keycloak-admin pending | `4a5612e` `d5597cb` `7712033` `04f259f` |
 
 ---
 
@@ -86,11 +86,14 @@ a631c86 fix(e2e): Polaris bind idempotency + Keycloak issuer Host header + statu
 ---
 
 ## 7. Remaining work (resume checklist)
-1. **4d notebooks UI** — integrate + commit (in progress).
-2. **4d execution (4d-1)** — stand up the Python `pyspark[connect]` broker; wire `/run` to stream stdout/results/errors; bump cluster `last_activity_at`. **Spike this against a live Spark Connect cluster first.**
-3. **4e enforcement** — add groups/admin to the JWT principal; call `authz.Allows` in cluster/notebook handlers (action gating + list filtering); make the UI Permissions tabs functional.
-4. **4e identity** — per-user token brokering to Polaris/Trino (attribute reads to the real user); Keycloak Admin API + Users & Groups screen.
-5. **Live smoke** — `task kind-up` end-to-end (the kind theme mount, cluster lifecycle, catalog browse, notebook save) — most paths are unit/integration-verified but not yet exercised together on a live cluster this session.
+Done since the last revision: ✅ notebooks UI, ✅ notebook ownership, ✅ server-side **notebook** permission enforcement (matrix tested), ✅ functional Permissions UI (clusters + notebooks).
+
+Still open:
+1. **4d execution (4d-1)** — the Python `pyspark[connect]` broker; wire `/run` to stream stdout/results/errors and bump cluster `last_activity_at`. **Infra-gated: spike against a live Spark Connect cluster before claiming done** (`/run` currently returns 501). *Biggest remaining feature.*
+2. **4e cluster enforcement** — mirror the notebook gate on cluster handlers. Mechanical, but needs an `owner` column on `clusters` (migration) so a creator auto-gets `manage` (notebooks already have this). Verifiable without infra.
+3. **4e per-user identity** — brokered per-user tokens so Polaris/Trino reads + Spark execution attribute to the real user (not the service principal). **Infra-gated** (needs live Polaris/Trino audit to verify).
+4. **4e Keycloak Admin** — admin client + `/v1/admin/users|groups` endpoints + the Users & Groups screen. Net-new; the client/endpoints are httptest-verifiable, the screen is a UI build.
+5. **Live smoke** — `task kind-up` end-to-end (kind theme mount, cluster lifecycle, catalog browse, notebook save). Paths are unit/integration-verified but not exercised together on a live cluster this session.
 
 ---
 
