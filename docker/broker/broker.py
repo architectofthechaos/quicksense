@@ -11,9 +11,11 @@ any traceback. Sessions are cached per connect_url.
 Stdlib only (http.server) — no extra runtime deps, air-gapped. pyspark[connect]
 is already present in the QuickSense Spark image this runs on.
 """
+import glob
 import io
 import json
 import os
+import sys
 import traceback
 from contextlib import redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,10 +23,23 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 _sessions = {}
 
 
+def _ensure_pyspark_path():
+    """The Spark image bundles pyspark at $SPARK_HOME/python (not pip-installed),
+    so add it (+ the py4j zip) to sys.path before importing pyspark. Version-robust
+    via a glob so a py4j bump in the base image needs no change here."""
+    spark_home = os.environ.get("SPARK_HOME", "/opt/spark")
+    pyroot = os.path.join(spark_home, "python")
+    for p in [pyroot, *glob.glob(os.path.join(pyroot, "lib", "py4j-*-src.zip"))]:
+        if os.path.isdir(p) or os.path.isfile(p):
+            if p not in sys.path:
+                sys.path.insert(0, p)
+
+
 def _session(connect_url):
     """Return a cached SparkSession for connect_url, creating it on first use."""
     s = _sessions.get(connect_url)
     if s is None:
+        _ensure_pyspark_path()
         from pyspark.sql import SparkSession  # imported lazily so /healthz works without Spark
 
         s = SparkSession.builder.remote(connect_url).getOrCreate()
