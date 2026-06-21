@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/deepiq/quicksense/api/internal/auth"
+	"github.com/deepiq/quicksense/api/internal/broker"
 	"github.com/deepiq/quicksense/api/internal/k8s"
 	"github.com/deepiq/quicksense/api/internal/keycloak"
 	"github.com/deepiq/quicksense/api/internal/polaris"
@@ -138,6 +139,22 @@ func (f *fakeKeycloak) CreateGroup(_ context.Context, name string) (*keycloak.Gr
 }
 
 func (f *fakeKeycloak) AssignRealmRole(_ context.Context, _, _ string) error { return nil }
+
+// fakeBroker records the last Run and returns a canned result.
+type fakeBroker struct {
+	result         *broker.RunResult
+	lastConnectURL string
+	lastCode       string
+}
+
+func (f *fakeBroker) Run(_ context.Context, connectURL, code string) (*broker.RunResult, error) {
+	f.lastConnectURL = connectURL
+	f.lastCode = code
+	if f.result != nil {
+		return f.result, nil
+	}
+	return &broker.RunResult{Stdout: "ok"}, nil
+}
 
 // ---------------------------------------------------------------------------
 // fakeStore — in-memory store.Store implementation.

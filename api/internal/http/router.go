@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/deepiq/quicksense/api/internal/auth"
+	"github.com/deepiq/quicksense/api/internal/broker"
 	"github.com/deepiq/quicksense/api/internal/k8s"
 	"github.com/deepiq/quicksense/api/internal/keycloak"
 	"github.com/deepiq/quicksense/api/internal/polaris"
@@ -33,6 +34,7 @@ type RouterDeps struct {
 	Trino          trino.Client           // 4c: sample-data reads (nil ⇒ sample endpoint returns 501)
 	TrinoCatalog   string                 // 4c: Trino catalog the Polaris catalog maps to
 	KeycloakAdmin  keycloak.AdminClient   // 4e: Users & Groups (nil ⇒ admin endpoints return 501)
+	Broker         broker.Client          // 4d-1: Spark Connect execution (nil ⇒ /run returns 501)
 }
 
 // NewRouter builds and returns a configured chi.Mux.
@@ -80,7 +82,7 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 		r.Get("/clusters/{id}/logs", clh.logs)
 		r.Get("/clusters/{id}/metrics", clh.metrics)
 
-		nh := &notebookHandler{store: deps.Store}
+		nh := &notebookHandler{store: deps.Store, brk: deps.Broker}
 		r.Post("/notebooks", nh.create)
 		r.Get("/notebooks", nh.list)
 		r.Get("/notebooks/{id}", nh.get)

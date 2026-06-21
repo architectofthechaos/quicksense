@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/deepiq/quicksense/api/internal/auth"
+	"github.com/deepiq/quicksense/api/internal/broker"
 	"github.com/deepiq/quicksense/api/internal/config"
 	httpapi "github.com/deepiq/quicksense/api/internal/http"
 	"github.com/deepiq/quicksense/api/internal/k8s"
@@ -125,6 +126,7 @@ func main() {
 			fmt.Sprintf("http://%s:%s", cfg.KeycloakHost, cfg.KeycloakPort),
 			cfg.KeycloakRealm, cfg.KeycloakClientID, cfg.KeycloakClientSecret,
 			&http.Client{Timeout: 30 * time.Second}),
+		Broker: broker.NewHTTPClient(cfg.BrokerURL, &http.Client{Timeout: 5 * time.Minute}),
 	})
 
 	// Idle auto-terminate: periodically stop Running, unpinned clusters past

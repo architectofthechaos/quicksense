@@ -14,6 +14,7 @@ import (
 
 	"github.com/deepiq/quicksense/api/internal/auth"
 	"github.com/deepiq/quicksense/api/internal/authz"
+	"github.com/deepiq/quicksense/api/internal/broker"
 	"github.com/deepiq/quicksense/api/internal/store"
 )
 
@@ -34,6 +35,7 @@ func containsStr(ss []string, target string) bool {
 // separately to Spark Connect and is not part of this handler.
 type notebookHandler struct {
 	store store.Store
+	brk   broker.Client // 4d-1: Spark Connect execution broker (nil ⇒ /run is 501)
 }
 
 // nbCell / nbContent model the persisted cell content for export.
@@ -369,8 +371,43 @@ func (h *notebookHandler) run(w http.ResponseWriter, r *http.Request) {
 		forbid(w)
 		return
 	}
-	WriteError(w, http.StatusNotImplemented, "execution_unavailable",
-		"cell execution requires the Spark Connect broker (not yet configured)")
+	if h.brk == nil {
+		WriteError(w, http.StatusNotImplemented, "execution_unavailable",
+			"cell execution requires the Spark Connect broker (not configured)")
+		return
+	}
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Code) == "" {
+		WriteError(w, http.StatusBadRequest, "bad_request", "code is required")
+		return
+	}
+	if nb.AttachedClusterID == "" {
+		WriteError(w, http.StatusBadRequest, "no_cluster", "attach an interactive cluster first")
+		return
+	}
+	cluster, err := h.store.GetCluster(r.Context(), nb.AttachedClusterID)
+	if err != nil {
+		WriteError(w, http.StatusBadGateway, "cluster_error", "attached cluster is unavailable")
+		return
+	}
+	// The operator names the Spark Connect gRPC service "<cr>-server" on 15002.
+	connectURL := "sc://" + cluster.CRName + "-server:15002"
+	res, err := h.brk.Run(r.Context(), connectURL, req.Code)
+	if err != nil {
+		WriteError(w, http.StatusBadGateway, "execution_error", err.Error())
+		return
+	}
+	_ = h.store.TouchClusterActivity(r.Context(), nb.AttachedClusterID) // keeps it off idle-terminate
+	outputs := make([]map[string]string, 0, 2)
+	if res.Stdout != "" {
+		outputs = append(outputs, map[string]string{"type": "stdout", "text": res.Stdout})
+	}
+	if res.Error != "" {
+		outputs = append(outputs, map[string]string{"type": "error", "text": res.Error})
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"outputs": outputs})
 }
 
 // exportPy renders cells as a Jupytext-style .py with "# %%" cell markers.

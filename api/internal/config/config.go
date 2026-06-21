@@ -75,6 +75,9 @@ type Config struct {
 	TrinoUser    string // TRINO_USER (default: quicksense)
 	TrinoCatalog string // TRINO_CATALOG (default: iceberg) — Trino catalog the Polaris catalog maps to
 
+	// BrokerURL is the Spark Connect execution broker origin (4d-1).
+	BrokerURL string // BROKER_URL (default: http://spark-broker:8099)
+
 	// KubeconfigPath is the path to a kubeconfig file.
 	// Empty string means in-cluster config.
 	// Source: KUBECONFIG (default: "").
@@ -197,6 +200,7 @@ func LoadFrom(getenv func(string) string) (*Config, error) {
 	trinoPort := withDefault("TRINO_PORT", "8080")
 	trinoUser := withDefault("TRINO_USER", "quicksense")
 	trinoCatalog := withDefault("TRINO_CATALOG", "iceberg")
+	brokerURL := withDefault("BROKER_URL", "http://spark-broker:8099")
 
 	return &Config{
 		PostgresHost:     pgHost,
@@ -238,5 +242,7 @@ func LoadFrom(getenv func(string) string) (*Config, error) {
 		TrinoPort:    trinoPort,
 		TrinoUser:    trinoUser,
 		TrinoCatalog: trinoCatalog,
+
+		BrokerURL: brokerURL,
 	}, nil
 }

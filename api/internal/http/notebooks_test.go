@@ -8,6 +8,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/deepiq/quicksense/api/internal/broker"
+	"github.com/deepiq/quicksense/api/internal/store"
 )
 
 func notebookMux(fs *fakeStore) http.Handler {
@@ -117,6 +121,54 @@ func TestNotebookRunNotImplemented(t *testing.T) {
 	mux.ServeHTTP(w, authReq(http.MethodPost, "/v1/notebooks/"+id+"/run", mustJSON(map[string]any{"cell": 0})))
 	if w.Code != http.StatusNotImplemented {
 		t.Fatalf("run (broker not wired): expected 501, got %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestNotebookRunWithBroker(t *testing.T) {
+	fs := newFakeStore()
+	fb := &fakeBroker{result: &broker.RunResult{Stdout: "+---+\n| id|\n+---+\n|  1|\n+---+\n"}}
+	fs.seed(&store.Cluster{
+		ID: "cl-1", CRName: "qs-demo-abc", DesiredState: "Running", Owner: "qsuser",
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	})
+	mux := NewRouter(RouterDeps{Verifier: fakeVerifier{}, Polaris: &fakePolaris{}, Store: fs, K8s: newFakeK8s(), Broker: fb})
+
+	id := createNotebook(t, mux, `{"cells":[{"type":"code","source":"spark.sql('select 1 as id').show()"}]}`)
+
+	// attach the cluster
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodPost, "/v1/notebooks/"+id+"/attach", mustJSON(map[string]string{"cluster_id": "cl-1"})))
+	if w.Code != http.StatusOK {
+		t.Fatalf("attach: %d %s", w.Code, w.Body.String())
+	}
+
+	// run a cell → broker called with the resolved sc:// URL; outputs returned
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodPost, "/v1/notebooks/"+id+"/run", mustJSON(map[string]string{"code": "spark.sql('select 1 as id').show()"})))
+	if w.Code != http.StatusOK {
+		t.Fatalf("run: %d %s", w.Code, w.Body.String())
+	}
+	if fb.lastConnectURL != "sc://qs-demo-abc-server:15002" {
+		t.Errorf("connect URL: got %q", fb.lastConnectURL)
+	}
+	var resp struct {
+		Outputs []map[string]string `json:"outputs"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if len(resp.Outputs) != 1 || resp.Outputs[0]["type"] != "stdout" || !bytes.Contains([]byte(resp.Outputs[0]["text"]), []byte("id")) {
+		t.Errorf("outputs: %+v", resp.Outputs)
+	}
+}
+
+func TestNotebookRunRequiresAttachedCluster(t *testing.T) {
+	fs := newFakeStore()
+	fb := &fakeBroker{}
+	mux := NewRouter(RouterDeps{Verifier: fakeVerifier{}, Polaris: &fakePolaris{}, Store: fs, K8s: newFakeK8s(), Broker: fb})
+	id := createNotebook(t, mux, `{"cells":[]}`)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodPost, "/v1/notebooks/"+id+"/run", mustJSON(map[string]string{"code": "1+1"})))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("run without attached cluster: expected 400, got %d", w.Code)
 	}
 }
 
