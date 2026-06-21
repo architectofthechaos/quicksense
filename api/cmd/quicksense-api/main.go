@@ -27,6 +27,7 @@ import (
 	"github.com/deepiq/quicksense/api/internal/config"
 	httpapi "github.com/deepiq/quicksense/api/internal/http"
 	"github.com/deepiq/quicksense/api/internal/k8s"
+	"github.com/deepiq/quicksense/api/internal/keycloak"
 	"github.com/deepiq/quicksense/api/internal/polaris"
 	"github.com/deepiq/quicksense/api/internal/store"
 	"github.com/deepiq/quicksense/api/internal/trino"
@@ -120,6 +121,10 @@ func main() {
 		SparkConf:      cfg.CatalogSparkConf(),
 		Trino:          trino.NewHTTPClient(fmt.Sprintf("http://%s:%s", cfg.TrinoHost, cfg.TrinoPort), cfg.TrinoUser, &http.Client{Timeout: 30 * time.Second}),
 		TrinoCatalog:   cfg.TrinoCatalog,
+		KeycloakAdmin: keycloak.NewHTTPAdminClient(
+			fmt.Sprintf("http://%s:%s", cfg.KeycloakHost, cfg.KeycloakPort),
+			cfg.KeycloakRealm, cfg.KeycloakClientID, cfg.KeycloakClientSecret,
+			&http.Client{Timeout: 30 * time.Second}),
 	})
 
 	// Idle auto-terminate: periodically stop Running, unpinned clusters past

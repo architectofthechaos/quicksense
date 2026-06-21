@@ -15,6 +15,7 @@ import (
 
 	"github.com/deepiq/quicksense/api/internal/auth"
 	"github.com/deepiq/quicksense/api/internal/k8s"
+	"github.com/deepiq/quicksense/api/internal/keycloak"
 	"github.com/deepiq/quicksense/api/internal/polaris"
 	"github.com/deepiq/quicksense/api/internal/store"
 	"github.com/deepiq/quicksense/api/internal/trino"
@@ -113,6 +114,30 @@ func (f *fakeTrino) Sample(_ context.Context, catalog, schema, table string, lim
 	f.limit = limit
 	return f.result, nil
 }
+
+// fakeKeycloak is an in-memory keycloak.AdminClient for handler tests.
+type fakeKeycloak struct {
+	users  []keycloak.User
+	groups []keycloak.Group
+}
+
+func (f *fakeKeycloak) ListUsers(_ context.Context) ([]keycloak.User, error) { return f.users, nil }
+
+func (f *fakeKeycloak) CreateUser(_ context.Context, username, email string) (*keycloak.User, error) {
+	u := keycloak.User{ID: "new-" + username, Username: username, Email: email, Enabled: true}
+	f.users = append(f.users, u)
+	return &u, nil
+}
+
+func (f *fakeKeycloak) ListGroups(_ context.Context) ([]keycloak.Group, error) { return f.groups, nil }
+
+func (f *fakeKeycloak) CreateGroup(_ context.Context, name string) (*keycloak.Group, error) {
+	g := keycloak.Group{ID: "new-" + name, Name: name}
+	f.groups = append(f.groups, g)
+	return &g, nil
+}
+
+func (f *fakeKeycloak) AssignRealmRole(_ context.Context, _, _ string) error { return nil }
 
 // ---------------------------------------------------------------------------
 // fakeStore — in-memory store.Store implementation.

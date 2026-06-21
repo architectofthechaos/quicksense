@@ -13,6 +13,7 @@ import (
 
 	"github.com/deepiq/quicksense/api/internal/auth"
 	"github.com/deepiq/quicksense/api/internal/k8s"
+	"github.com/deepiq/quicksense/api/internal/keycloak"
 	"github.com/deepiq/quicksense/api/internal/polaris"
 	"github.com/deepiq/quicksense/api/internal/store"
 	"github.com/deepiq/quicksense/api/internal/trino"
@@ -20,17 +21,18 @@ import (
 
 // RouterDeps is the dependency-injection bundle passed to NewRouter.
 type RouterDeps struct {
-	Verifier auth.TokenVerifier     // B4: Keycloak JWT verifier
-	Polaris  polaris.Client         // B7: Polaris REST proxy
-	Store    store.Store            // B9: Postgres store
-	K8s      k8s.SparkConnectClient // B12: Spark compute client
-	Namespace      string            // SparkConnect target namespace
-	DefaultExec    int32             // default executor count per cluster
-	SparkImage     string            // Spark container image
-	ServiceAccount string            // Kubernetes ServiceAccount for driver pods
-	SparkConf      map[string]string // Iceberg/catalog SparkConf entries
-	Trino          trino.Client      // 4c: sample-data reads (nil ⇒ sample endpoint returns 501)
-	TrinoCatalog   string            // 4c: Trino catalog the Polaris catalog maps to
+	Verifier       auth.TokenVerifier     // B4: Keycloak JWT verifier
+	Polaris        polaris.Client         // B7: Polaris REST proxy
+	Store          store.Store            // B9: Postgres store
+	K8s            k8s.SparkConnectClient // B12: Spark compute client
+	Namespace      string                 // SparkConnect target namespace
+	DefaultExec    int32                  // default executor count per cluster
+	SparkImage     string                 // Spark container image
+	ServiceAccount string                 // Kubernetes ServiceAccount for driver pods
+	SparkConf      map[string]string      // Iceberg/catalog SparkConf entries
+	Trino          trino.Client           // 4c: sample-data reads (nil ⇒ sample endpoint returns 501)
+	TrinoCatalog   string                 // 4c: Trino catalog the Polaris catalog maps to
+	KeycloakAdmin  keycloak.AdminClient   // 4e: Users & Groups (nil ⇒ admin endpoints return 501)
 }
 
 // NewRouter builds and returns a configured chi.Mux.
@@ -100,6 +102,14 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 		r.Get("/notebooks/{id}/permissions", nbph.list)
 		r.Put("/notebooks/{id}/permissions", nbph.grant)
 		r.Delete("/notebooks/{id}/permissions", nbph.revoke)
+
+		// 4e: Users & Groups via the Keycloak Admin API (admin-gated).
+		ah := &adminHandler{kc: deps.KeycloakAdmin}
+		r.Get("/admin/users", ah.listUsers)
+		r.Post("/admin/users", ah.createUser)
+		r.Put("/admin/users/{id}/roles", ah.assignRole)
+		r.Get("/admin/groups", ah.listGroups)
+		r.Post("/admin/groups", ah.createGroup)
 	})
 
 	return r
