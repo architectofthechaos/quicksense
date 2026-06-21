@@ -271,6 +271,20 @@ export type RunOutput =
   | { type: "result"; columns: string[]; rows: unknown[][] }
   | { type: "error"; ename: string; evalue: string; traceback: string[] };
 
+// ── Identity & Access (Phase 4e) ─────────────────────────────────────────────
+// Keycloak realm users + groups, surfaced through the Go API's admin endpoints.
+// Every admin call requires the `quicksense_admin` realm role (403 otherwise) and
+// returns 501 when Keycloak admin is unconfigured. The browser reaches these only
+// through the BFF (`/api/admin/...`); the Bearer token is injected server-side.
+
+// A realm user as returned by GET /v1/admin/users.
+export type KcUser = { id: string; username: string; email: string; enabled: boolean };
+export type KcUsersResponse = { users: KcUser[] };
+
+// A realm group as returned by GET /v1/admin/groups.
+export type KcGroup = { id: string; name: string };
+export type KcGroupsResponse = { groups: KcGroup[] };
+
 // Permission level for object sharing (mirrors the 4e permissions contract).
 export type PermissionLevel = "view" | "run" | "edit" | "manage";
 export type PrincipalType = "user" | "group";

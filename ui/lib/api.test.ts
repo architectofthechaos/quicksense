@@ -33,6 +33,11 @@ import {
   listPermissions,
   grantPermission,
   revokePermission,
+  adminListUsers,
+  adminCreateUser,
+  adminAssignRole,
+  adminListGroups,
+  adminCreateGroup,
   notebookExportUrl,
   notebookExport,
   ApiClientError,
@@ -694,5 +699,119 @@ describe("permissions (generic, kind-keyed)", () => {
       new Response(JSON.stringify({ error: { code: "forbidden", message: "no" } }), { status: 403 }),
     );
     await expect(revokePermission("clusters", "c1", "user", "alice", "TOK")).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+// ── Identity & Access (Phase 4e) ─────────────────────────────────────────────
+// Keycloak-admin endpoints. All require the quicksense_admin realm role (403) and
+// 501 when Keycloak admin is unconfigured — the fns just propagate those statuses
+// via ApiClientError so the UI can render distinct 403/501 states.
+describe("adminListUsers", () => {
+  it("unwraps the users envelope", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ users: [{ id: "u1", username: "alice", email: "a@x", enabled: true }] }), { status: 200 }),
+    );
+    const out = await adminListUsers("TOK");
+    expect(out).toEqual([{ id: "u1", username: "alice", email: "a@x", enabled: true }]);
+    expect(spy.mock.calls[0][0]).toBe("http://api.test/v1/admin/users");
+  });
+  it("tolerates a missing users array", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    await expect(adminListUsers("TOK")).resolves.toEqual([]);
+  });
+  it("throws ApiClientError with status 403 when not an admin", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "forbidden", message: "admin only" } }), { status: 403 }),
+    );
+    await expect(adminListUsers("TOK")).rejects.toMatchObject({ status: 403, code: "forbidden" });
+  });
+  it("throws ApiClientError with status 501 when unconfigured", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "not_implemented", message: "keycloak admin not configured" } }), { status: 501 }),
+    );
+    await expect(adminListUsers("TOK")).rejects.toMatchObject({ status: 501 });
+  });
+});
+
+describe("adminCreateUser", () => {
+  it("POSTs username + email and returns the created user", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ id: "u2", username: "bob", email: "b@x", enabled: true }), { status: 201 }),
+    );
+    const u = await adminCreateUser("TOK", "bob", "b@x");
+    expect(u.id).toBe("u2");
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe("http://api.test/v1/admin/users");
+    expect(init!.method).toBe("POST");
+    expect(JSON.parse(init!.body as string)).toEqual({ username: "bob", email: "b@x" });
+  });
+  it("propagates an upstream error envelope", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "conflict", message: "exists" } }), { status: 409 }),
+    );
+    await expect(adminCreateUser("TOK", "bob", "b@x")).rejects.toMatchObject({ status: 409, code: "conflict" });
+  });
+});
+
+describe("adminAssignRole", () => {
+  it("PUTs the role to the user's roles endpoint and treats 204 as success", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    await expect(adminAssignRole("TOK", "u1", "quicksense_admin")).resolves.toBeUndefined();
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe("http://api.test/v1/admin/users/u1/roles");
+    expect(init!.method).toBe("PUT");
+    expect(JSON.parse(init!.body as string)).toEqual({ role: "quicksense_admin" });
+  });
+  it("encodes the user id in the path", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    await adminAssignRole("TOK", "a b", "viewer");
+    expect(spy.mock.calls[0][0]).toBe("http://api.test/v1/admin/users/a%20b/roles");
+  });
+  it("throws ApiClientError on a non-204 error", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "not_found", message: "no role" } }), { status: 404 }),
+    );
+    await expect(adminAssignRole("TOK", "u1", "ghost")).rejects.toMatchObject({ status: 404, code: "not_found" });
+  });
+});
+
+describe("adminListGroups", () => {
+  it("unwraps the groups envelope", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ groups: [{ id: "g1", name: "data" }] }), { status: 200 }),
+    );
+    const out = await adminListGroups("TOK");
+    expect(out).toEqual([{ id: "g1", name: "data" }]);
+    expect(spy.mock.calls[0][0]).toBe("http://api.test/v1/admin/groups");
+  });
+  it("tolerates a missing groups array", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    await expect(adminListGroups("TOK")).resolves.toEqual([]);
+  });
+  it("throws ApiClientError on a 403", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "forbidden", message: "admin only" } }), { status: 403 }),
+    );
+    await expect(adminListGroups("TOK")).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe("adminCreateGroup", () => {
+  it("POSTs the name and returns the created group", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ id: "g2", name: "ml" }), { status: 201 }),
+    );
+    const g = await adminCreateGroup("TOK", "ml");
+    expect(g).toEqual({ id: "g2", name: "ml" });
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe("http://api.test/v1/admin/groups");
+    expect(init!.method).toBe("POST");
+    expect(JSON.parse(init!.body as string)).toEqual({ name: "ml" });
+  });
+  it("propagates an upstream error envelope", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "conflict", message: "exists" } }), { status: 409 }),
+    );
+    await expect(adminCreateGroup("TOK", "ml")).rejects.toMatchObject({ status: 409, code: "conflict" });
   });
 });

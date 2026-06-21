@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Boxes, Database, Workflow, SquareTerminal, NotebookPen, Bot, Lock, type LucideIcon } from "lucide-react";
+import { Boxes, Database, Workflow, SquareTerminal, NotebookPen, Bot, Lock, ShieldCheck, type LucideIcon } from "lucide-react";
 import { ConnectionStatus } from "@/components/ConnectionStatus";
 
 type Item = { key: string; label: string; href: string; icon: LucideIcon };
@@ -10,6 +10,7 @@ const ITEMS: Item[] = [
   { key: "clusters", label: "Clusters", href: "/app/clusters", icon: Boxes },
   { key: "catalog", label: "Catalog", href: "/app/catalog", icon: Database },
   { key: "notebooks", label: "Notebooks", href: "/app/notebooks", icon: NotebookPen },
+  { key: "admin", label: "Identity & Access", href: "/app/admin", icon: ShieldCheck },
 ];
 
 const FUTURE: { label: string; icon: LucideIcon }[] = [

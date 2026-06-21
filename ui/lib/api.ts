@@ -22,6 +22,10 @@ import type {
   Permission,
   PermissionsResponse,
   PrincipalType,
+  KcUser,
+  KcUsersResponse,
+  KcGroup,
+  KcGroupsResponse,
   ApiError,
 } from "@/lib/types";
 
@@ -381,6 +385,53 @@ export async function revokePermission(
   const qs = `principal_type=${encodeURIComponent(principalType)}&principal_id=${encodeURIComponent(principalId)}`;
   const res = await apiFetch(`${permPath(kind, id)}?${qs}`, token, { method: "DELETE" });
   if (!res.ok && res.status !== 204) throw await asError(res);
+}
+
+// ── Identity & Access (Phase 4e) ─────────────────────────────────────────────
+// Keycloak-admin: list/create realm users + groups, assign a realm role to a
+// user. Each fn maps 1:1 to a Go endpoint under /v1/admin and unwraps its
+// envelope. Every endpoint requires the quicksense_admin realm role (else 403)
+// and returns 501 when Keycloak admin is unconfigured — both surface as an
+// ApiClientError carrying that status so the UI renders distinct states. The
+// browser reaches these only through the BFF.
+
+export async function adminListUsers(token: string): Promise<KcUser[]> {
+  const res = await apiFetch("/v1/admin/users", token);
+  if (!res.ok) throw await asError(res);
+  const body = (await res.json()) as KcUsersResponse;
+  return body.users ?? [];
+}
+
+export async function adminCreateUser(token: string, username: string, email: string): Promise<KcUser> {
+  const res = await apiFetch("/v1/admin/users", token, {
+    method: "POST",
+    body: JSON.stringify({ username, email }),
+  });
+  if (!res.ok) throw await asError(res);
+  return (await res.json()) as KcUser;
+}
+
+// adminAssignRole assigns a realm role to a user. Returns 204 (no body); a
+// non-ok/non-204 throws.
+export async function adminAssignRole(token: string, userId: string, role: string): Promise<void> {
+  const res = await apiFetch(`/v1/admin/users/${encodeURIComponent(userId)}/roles`, token, {
+    method: "PUT",
+    body: JSON.stringify({ role }),
+  });
+  if (!res.ok && res.status !== 204) throw await asError(res);
+}
+
+export async function adminListGroups(token: string): Promise<KcGroup[]> {
+  const res = await apiFetch("/v1/admin/groups", token);
+  if (!res.ok) throw await asError(res);
+  const body = (await res.json()) as KcGroupsResponse;
+  return body.groups ?? [];
+}
+
+export async function adminCreateGroup(token: string, name: string): Promise<KcGroup> {
+  const res = await apiFetch("/v1/admin/groups", token, { method: "POST", body: JSON.stringify({ name }) });
+  if (!res.ok) throw await asError(res);
+  return (await res.json()) as KcGroup;
 }
 
 // notebookExportUrl builds the *browser-facing* BFF export URL (not the upstream
