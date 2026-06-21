@@ -102,3 +102,29 @@ func TestMigration0002AddsClusterConfig(t *testing.T) {
 		}
 	}
 }
+
+// TestMigration0003AddsNotebooks verifies the 4d notebooks migration is embedded
+// and creates the folders/notebooks/notebook_revisions tables.
+func TestMigration0003AddsNotebooks(t *testing.T) {
+	for _, f := range []string{
+		"migrations/0003_notebooks.up.sql",
+		"migrations/0003_notebooks.down.sql",
+	} {
+		data, err := fs.ReadFile(store.MigrationsFS, f)
+		if err != nil {
+			t.Fatalf("expected embedded file %q: %v", f, err)
+		}
+		if len(data) == 0 {
+			t.Errorf("embedded file %q is empty", f)
+		}
+	}
+	up, err := fs.ReadFile(store.MigrationsFS, "migrations/0003_notebooks.up.sql")
+	if err != nil {
+		t.Fatalf("reading 0003 up: %v", err)
+	}
+	for _, tbl := range []string{"CREATE TABLE folders", "CREATE TABLE notebooks", "CREATE TABLE notebook_revisions"} {
+		if !strings.Contains(string(up), tbl) {
+			t.Errorf("0003 up migration missing %q", tbl)
+		}
+	}
+}
