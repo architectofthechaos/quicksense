@@ -13,8 +13,21 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/deepiq/quicksense/api/internal/auth"
+	"github.com/deepiq/quicksense/api/internal/authz"
 	"github.com/deepiq/quicksense/api/internal/store"
 )
+
+// notebookAdminRole is the realm role granting implicit manage on all notebooks.
+const notebookAdminRole = "quicksense_admin"
+
+func containsStr(ss []string, target string) bool {
+	for _, s := range ss {
+		if s == target {
+			return true
+		}
+	}
+	return false
+}
 
 // notebookHandler handles /v1/notebooks routes. Notebook source + revisions live
 // in the API's Postgres (control-plane storage); execution (4d-1) is brokered
@@ -72,6 +85,31 @@ func (h *notebookHandler) getOr404(w http.ResponseWriter, r *http.Request, id st
 	return nb
 }
 
+// authorize reports whether the caller may perform an action requiring `level`
+// on the notebook. Owner ⇒ manage; quicksense_admin ⇒ manage; else the
+// effective level from direct/group grants must meet `level`. Enforced
+// server-side — the UI only reflects this.
+func (h *notebookHandler) authorize(r *http.Request, nb *store.Notebook, level string) bool {
+	p, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		return false
+	}
+	perms, _ := h.store.ListPermissions(r.Context(), "notebook", nb.ID)
+	grants := make([]authz.Grant, 0, len(perms))
+	for _, g := range perms {
+		grants = append(grants, authz.Grant{
+			ObjectType: g.ObjectType, ObjectID: g.ObjectID,
+			PrincipalType: g.PrincipalType, PrincipalID: g.PrincipalID, Level: g.Level,
+		})
+	}
+	ap := authz.Principal{Username: p.Username, Groups: p.Groups, Admin: containsStr(p.Roles, notebookAdminRole)}
+	return authz.Allows("notebook", nb.ID, grants, ap, nb.Owner, level)
+}
+
+func forbid(w http.ResponseWriter) {
+	WriteError(w, http.StatusForbidden, "forbidden", "you do not have permission for this action")
+}
+
 // create handles POST /v1/notebooks.
 func (h *notebookHandler) create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -119,8 +157,11 @@ func (h *notebookHandler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]notebookResponse, 0, len(nbs))
 	for _, n := range nbs {
-		// list view omits content for payload size
-		n.Content = nil
+		n := n // capture for &n
+		if !h.authorize(r, &n, "view") {
+			continue // server-side scoping: only notebooks the caller may view
+		}
+		n.Content = nil // list view omits content for payload size
 		out = append(out, toNotebookResponse(n))
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"notebooks": out})
@@ -132,12 +173,24 @@ func (h *notebookHandler) get(w http.ResponseWriter, r *http.Request) {
 	if nb == nil {
 		return
 	}
+	if !h.authorize(r, nb, "view") {
+		forbid(w)
+		return
+	}
 	WriteJSON(w, http.StatusOK, toNotebookResponse(*nb))
 }
 
 // update handles PUT /v1/notebooks/{id} (save cell content).
 func (h *notebookHandler) update(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	existing := h.getOr404(w, r, id)
+	if existing == nil {
+		return
+	}
+	if !h.authorize(r, existing, "edit") {
+		forbid(w)
+		return
+	}
 	var req struct {
 		Content json.RawMessage `json:"content"`
 	}
@@ -147,10 +200,6 @@ func (h *notebookHandler) update(w http.ResponseWriter, r *http.Request) {
 	}
 	nb, err := h.store.UpdateNotebookContent(r.Context(), id, req.Content)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			WriteError(w, http.StatusNotFound, "not_found", "notebook not found")
-			return
-		}
 		WriteError(w, http.StatusInternalServerError, "store_error", "failed to save notebook")
 		return
 	}
@@ -159,11 +208,16 @@ func (h *notebookHandler) update(w http.ResponseWriter, r *http.Request) {
 
 // trash handles DELETE /v1/notebooks/{id} (soft-delete).
 func (h *notebookHandler) trash(w http.ResponseWriter, r *http.Request) {
-	if err := h.store.TrashNotebook(r.Context(), chi.URLParam(r, "id")); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			WriteError(w, http.StatusNotFound, "not_found", "notebook not found")
-			return
-		}
+	id := chi.URLParam(r, "id")
+	nb := h.getOr404(w, r, id)
+	if nb == nil {
+		return
+	}
+	if !h.authorize(r, nb, "manage") {
+		forbid(w)
+		return
+	}
+	if err := h.store.TrashNotebook(r.Context(), id); err != nil {
 		WriteError(w, http.StatusInternalServerError, "store_error", "failed to trash notebook")
 		return
 	}
@@ -173,6 +227,14 @@ func (h *notebookHandler) trash(w http.ResponseWriter, r *http.Request) {
 // attach handles POST /v1/notebooks/{id}/attach {cluster_id}.
 func (h *notebookHandler) attach(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	existing := h.getOr404(w, r, id)
+	if existing == nil {
+		return
+	}
+	if !h.authorize(r, existing, "edit") {
+		forbid(w)
+		return
+	}
 	var req struct {
 		ClusterID string `json:"cluster_id"`
 	}
@@ -182,10 +244,6 @@ func (h *notebookHandler) attach(w http.ResponseWriter, r *http.Request) {
 	}
 	nb, err := h.store.AttachNotebookCluster(r.Context(), id, req.ClusterID)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			WriteError(w, http.StatusNotFound, "not_found", "notebook not found")
-			return
-		}
 		WriteError(w, http.StatusInternalServerError, "store_error", "failed to attach cluster")
 		return
 	}
@@ -194,7 +252,16 @@ func (h *notebookHandler) attach(w http.ResponseWriter, r *http.Request) {
 
 // listRevisions handles GET /v1/notebooks/{id}/revisions.
 func (h *notebookHandler) listRevisions(w http.ResponseWriter, r *http.Request) {
-	revs, err := h.store.ListRevisions(r.Context(), chi.URLParam(r, "id"))
+	id := chi.URLParam(r, "id")
+	nb := h.getOr404(w, r, id)
+	if nb == nil {
+		return
+	}
+	if !h.authorize(r, nb, "view") {
+		forbid(w)
+		return
+	}
+	revs, err := h.store.ListRevisions(r.Context(), id)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "store_error", "failed to list revisions")
 		return
@@ -214,6 +281,10 @@ func (h *notebookHandler) saveRevision(w http.ResponseWriter, r *http.Request) {
 	if nb == nil {
 		return
 	}
+	if !h.authorize(r, nb, "edit") {
+		forbid(w)
+		return
+	}
 	var req struct {
 		Message string `json:"message"`
 	}
@@ -229,6 +300,14 @@ func (h *notebookHandler) saveRevision(w http.ResponseWriter, r *http.Request) {
 // restoreRevision handles POST /v1/notebooks/{id}/revisions/{rev}/restore.
 func (h *notebookHandler) restoreRevision(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	nb := h.getOr404(w, r, id)
+	if nb == nil {
+		return
+	}
+	if !h.authorize(r, nb, "edit") {
+		forbid(w)
+		return
+	}
 	revID := chi.URLParam(r, "rev")
 	rev, err := h.store.GetRevision(r.Context(), revID)
 	if err != nil {
@@ -239,18 +318,22 @@ func (h *notebookHandler) restoreRevision(w http.ResponseWriter, r *http.Request
 		WriteError(w, http.StatusInternalServerError, "store_error", "failed to load revision")
 		return
 	}
-	nb, err := h.store.UpdateNotebookContent(r.Context(), id, rev.Snapshot)
+	updated, err := h.store.UpdateNotebookContent(r.Context(), id, rev.Snapshot)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "store_error", "failed to restore revision")
 		return
 	}
-	WriteJSON(w, http.StatusOK, toNotebookResponse(*nb))
+	WriteJSON(w, http.StatusOK, toNotebookResponse(*updated))
 }
 
 // export handles GET /v1/notebooks/{id}/export?format=ipynb|py.
 func (h *notebookHandler) export(w http.ResponseWriter, r *http.Request) {
 	nb := h.getOr404(w, r, chi.URLParam(r, "id"))
 	if nb == nil {
+		return
+	}
+	if !h.authorize(r, nb, "view") {
+		forbid(w)
 		return
 	}
 	var content nbContent
@@ -278,7 +361,12 @@ func (h *notebookHandler) export(w http.ResponseWriter, r *http.Request) {
 // it is wired this returns 501 so the UI surfaces a clear "execution unavailable"
 // state rather than a hard error.
 func (h *notebookHandler) run(w http.ResponseWriter, r *http.Request) {
-	if h.getOr404(w, r, chi.URLParam(r, "id")) == nil {
+	nb := h.getOr404(w, r, chi.URLParam(r, "id"))
+	if nb == nil {
+		return
+	}
+	if !h.authorize(r, nb, "run") {
+		forbid(w)
 		return
 	}
 	WriteError(w, http.StatusNotImplemented, "execution_unavailable",

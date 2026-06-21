@@ -16,6 +16,7 @@ import (
 type Principal struct {
 	Username string
 	Roles    []string
+	Groups   []string
 }
 
 // TokenVerifier is the contract for validating a raw Bearer token.
@@ -77,7 +78,25 @@ func (v *KeycloakVerifier) Verify(_ context.Context, raw string) (*Principal, er
 	return &Principal{
 		Username: username,
 		Roles:    roles,
+		Groups:   stringSliceClaim(claims, "groups"),
 	}, nil
+}
+
+// stringSliceClaim extracts an optional []string claim (e.g. Keycloak "groups").
+// Missing or malformed → nil (groups are optional; absence just means no group
+// membership for authorization).
+func stringSliceClaim(claims jwt.MapClaims, key string) []string {
+	raw, ok := claims[key].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // realmRoles extracts the []string role list from realm_access.roles in claims.

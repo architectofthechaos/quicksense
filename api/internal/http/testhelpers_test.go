@@ -30,6 +30,18 @@ func (fakeVerifier) Verify(_ context.Context, _ string) (*auth.Principal, error)
 	return &auth.Principal{Username: "qsuser", Roles: []string{"polaris_admin"}}, nil
 }
 
+// fakeVerifierAs returns a chosen principal — for object-level authz tests where
+// the caller is not the owner.
+type fakeVerifierAs struct {
+	username string
+	roles    []string
+	groups   []string
+}
+
+func (f fakeVerifierAs) Verify(_ context.Context, _ string) (*auth.Principal, error) {
+	return &auth.Principal{Username: f.username, Roles: f.roles, Groups: f.groups}, nil
+}
+
 // bearerHeader returns an Authorization header value accepted by fakeVerifier.
 const bearerHeader = "Bearer test-token"
 
@@ -527,6 +539,19 @@ func newTestMuxWithClusters(fp *fakePolaris, fs *fakeStore, fk k8s.SparkConnectC
 		Polaris:     fp,
 		Store:       fs,
 		K8s:         fk,
+		Namespace:   "quicksense",
+		DefaultExec: 2,
+		SparkImage:  "spark:4.0.3",
+	})
+}
+
+// muxAs builds a router authenticated as a specific principal (object-level authz).
+func muxAs(fs *fakeStore, v auth.TokenVerifier) http.Handler {
+	return NewRouter(RouterDeps{
+		Verifier:    v,
+		Polaris:     &fakePolaris{},
+		Store:       fs,
+		K8s:         newFakeK8s(),
 		Namespace:   "quicksense",
 		DefaultExec: 2,
 		SparkImage:  "spark:4.0.3",
