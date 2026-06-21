@@ -460,3 +460,50 @@ func (h *clusterHandler) patch(w http.ResponseWriter, r *http.Request) {
 	}
 	h.respondCluster(w, r, id, http.StatusOK)
 }
+
+// events returns Kubernetes events for the cluster's CR + pods.
+func (h *clusterHandler) events(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	c := h.getClusterOr404(w, r, id)
+	if c == nil {
+		return
+	}
+	events, err := h.k8s.Events(r.Context(), c.CRName)
+	if err != nil {
+		WriteError(w, http.StatusBadGateway, "events_error", "failed to fetch events: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"events": events})
+}
+
+// logs returns recent driver-pod logs as text/plain (the UI tails by polling).
+func (h *clusterHandler) logs(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	c := h.getClusterOr404(w, r, id)
+	if c == nil {
+		return
+	}
+	logs, err := h.k8s.DriverLogs(r.Context(), c.CRName, 500)
+	if err != nil {
+		WriteError(w, http.StatusBadGateway, "logs_error", "failed to fetch driver logs: "+err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(logs))
+}
+
+// metrics returns best-effort CPU/memory usage (available=false without metrics-server).
+func (h *clusterHandler) metrics(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	c := h.getClusterOr404(w, r, id)
+	if c == nil {
+		return
+	}
+	m, err := h.k8s.Metrics(r.Context(), c.CRName)
+	if err != nil {
+		WriteError(w, http.StatusBadGateway, "metrics_error", "failed to fetch metrics: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, m)
+}

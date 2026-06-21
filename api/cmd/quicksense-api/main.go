@@ -98,7 +98,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("quicksense-api: k8s client: %v", err)
 	}
-	scc := k8s.NewSparkConnectClient(dyn, cfg.SparkConnectNamespace)
+	clientset, err := k8s.NewClientset(cfg.KubeconfigPath)
+	if err != nil {
+		log.Fatalf("quicksense-api: k8s clientset: %v", err)
+	}
+	scc := k8s.NewSparkConnectClientWithClientset(dyn, clientset, cfg.SparkConnectNamespace)
 	log.Printf("quicksense-api: k8s SparkConnect client ready (namespace=%s, image=%s, executors=%d)",
 		cfg.SparkConnectNamespace, cfg.SparkImage, cfg.ClusterDefaultExecutors)
 
@@ -114,6 +118,10 @@ func main() {
 		ServiceAccount: cfg.SparkServiceAccount,
 		SparkConf:      cfg.CatalogSparkConf(),
 	})
+
+	// Idle auto-terminate: periodically stop Running, unpinned clusters past
+	// their configured idle window (server-side enforcement; pin excludes).
+	go httpapi.NewIdleReconciler(st, scc).Start(ctx, time.Minute)
 
 	// ── 9. Serve ──────────────────────────────────────────────────────────────
 	srv := &http.Server{

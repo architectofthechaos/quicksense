@@ -68,6 +68,9 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 		r.Post("/clusters/{id}/stop", clh.stop)
 		r.Post("/clusters/{id}/restart", clh.restart)
 		r.Post("/clusters/{id}/clone", clh.clone)
+		r.Get("/clusters/{id}/events", clh.events)
+		r.Get("/clusters/{id}/logs", clh.logs)
+		r.Get("/clusters/{id}/metrics", clh.metrics)
 	})
 
 	return r

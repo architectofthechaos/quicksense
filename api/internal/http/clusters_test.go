@@ -424,6 +424,16 @@ func (f *fakeK8sDeleteNotFound) Delete(_ context.Context, name string) error {
 	}, name)
 }
 
+func (f *fakeK8sDeleteNotFound) Events(_ context.Context, _ string) ([]k8s.Event, error) {
+	return nil, nil
+}
+func (f *fakeK8sDeleteNotFound) DriverLogs(_ context.Context, _ string, _ int64) (string, error) {
+	return "", nil
+}
+func (f *fakeK8sDeleteNotFound) Metrics(_ context.Context, _ string) (k8s.Metrics, error) {
+	return k8s.Metrics{}, nil
+}
+
 // ---------------------------------------------------------------------------
 // B12/B13 review additions: compensating-path coverage
 // ---------------------------------------------------------------------------
@@ -602,5 +612,64 @@ func TestPatchCluster_Pin(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp["pinned"] != true {
 		t.Errorf("pinned: got %v, want true", resp["pinned"])
+	}
+}
+
+func TestClusterEvents(t *testing.T) {
+	fs := newFakeStore()
+	fk := newFakeK8s()
+	fk.events = []k8s.Event{{Type: "Normal", Reason: "Scheduled", Message: "ok", Object: "qs-c1-server"}}
+	seedConfigured(fs, "c1", "qs-c1", map[string]any{"name": "c1"})
+	mux := clusterMux(fs, fk)
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodGet, "/v1/clusters/c1/events", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Events []map[string]any `json:"events"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if len(resp.Events) != 1 || resp.Events[0]["reason"] != "Scheduled" {
+		t.Errorf("events: %+v", resp.Events)
+	}
+}
+
+func TestClusterLogs(t *testing.T) {
+	fs := newFakeStore()
+	fk := newFakeK8s()
+	fk.logs = "line-1\nline-2\n"
+	seedConfigured(fs, "c1", "qs-c1", map[string]any{"name": "c1"})
+	mux := clusterMux(fs, fk)
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodGet, "/v1/clusters/c1/logs", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "text/plain; charset=utf-8" {
+		t.Errorf("content-type: got %q", ct)
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("line-1")) {
+		t.Errorf("logs body missing content: %q", w.Body.String())
+	}
+}
+
+func TestClusterMetrics(t *testing.T) {
+	fs := newFakeStore()
+	fk := newFakeK8s()
+	seedConfigured(fs, "c1", "qs-c1", map[string]any{"name": "c1"})
+	mux := clusterMux(fs, fk)
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodGet, "/v1/clusters/c1/metrics", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["available"] != false {
+		t.Errorf("available: got %v, want false", resp["available"])
 	}
 }

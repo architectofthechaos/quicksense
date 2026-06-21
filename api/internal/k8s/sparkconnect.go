@@ -9,14 +9,18 @@ package k8s
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 )
 
 // SparkConnectGVR is the GroupVersionResource for SparkConnect CRs.
@@ -30,6 +34,10 @@ var SparkConnectGVR = schema.GroupVersionResource{
 // statusStatePath is the field path for the cluster state inside .status.
 // Isolated here so B17 can update it in one place.
 var statusStatePath = []string{"status", "state"}
+
+// eventsGVR is the core/v1 Events resource, listed via the dynamic client to
+// surface scheduling / image-pull / lifecycle events for a cluster's pods.
+var eventsGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "events"}
 
 // ClusterSpec describes the desired SparkConnect cluster. The target namespace
 // is owned by the client (NewSparkConnectClient), not the spec: every CR is
@@ -65,6 +73,30 @@ type ClusterStatus struct {
 	Ready bool
 }
 
+// Event is a normalized Kubernetes event for a cluster's pods/CR.
+type Event struct {
+	Type     string    `json:"type"`
+	Reason   string    `json:"reason"`
+	Message  string    `json:"message"`
+	Object   string    `json:"object"`
+	Count    int64     `json:"count"`
+	LastSeen time.Time `json:"last_seen"`
+}
+
+// PodMetrics is best-effort CPU/memory usage for one pod.
+type PodMetrics struct {
+	Name   string `json:"name"`
+	CPU    string `json:"cpu"`
+	Memory string `json:"memory"`
+}
+
+// Metrics is the best-effort resource-usage view for a cluster. Available is
+// false when metrics-server is absent (SPEC-004b permits a documented stub).
+type Metrics struct {
+	Available bool         `json:"available"`
+	Pods      []PodMetrics `json:"pods,omitempty"`
+}
+
 // SparkConnectClient manages SparkConnect CRs.
 type SparkConnectClient interface {
 	// Create provisions a new SparkConnect CR and returns the CR name.
@@ -73,6 +105,12 @@ type SparkConnectClient interface {
 	Get(ctx context.Context, name string) (ClusterStatus, error)
 	// Delete removes a SparkConnect CR.
 	Delete(ctx context.Context, name string) error
+	// Events returns Kubernetes events for the cluster's CR and pods.
+	Events(ctx context.Context, crName string) ([]Event, error)
+	// DriverLogs returns up to tailLines of the driver (server) pod's logs.
+	DriverLogs(ctx context.Context, crName string, tailLines int64) (string, error)
+	// Metrics returns best-effort CPU/memory usage for the cluster.
+	Metrics(ctx context.Context, crName string) (Metrics, error)
 }
 
 // Compile-time interface check.
@@ -80,14 +118,22 @@ var _ SparkConnectClient = (*dynamicClient)(nil)
 
 type dynamicClient struct {
 	dyn       dynamic.Interface
+	clientset kubernetes.Interface // optional; required for DriverLogs
 	namespace string
 }
 
 // NewSparkConnectClient returns a SparkConnectClient backed by the given
 // dynamic client. namespace is authoritative: all CRs are created, read, and
-// deleted in it.
+// deleted in it. Driver logs require a clientset — see
+// NewSparkConnectClientWithClientset.
 func NewSparkConnectClient(dyn dynamic.Interface, namespace string) SparkConnectClient {
 	return &dynamicClient{dyn: dyn, namespace: namespace}
+}
+
+// NewSparkConnectClientWithClientset additionally wires a typed clientset so
+// DriverLogs can read pod logs.
+func NewSparkConnectClientWithClientset(dyn dynamic.Interface, clientset kubernetes.Interface, namespace string) SparkConnectClient {
+	return &dynamicClient{dyn: dyn, clientset: clientset, namespace: namespace}
 }
 
 // buildCR constructs the unstructured SparkConnect CR from a ClusterSpec.
@@ -297,4 +343,55 @@ func isReadyState(phase string) bool {
 // Delete removes the named SparkConnect CR.
 func (c *dynamicClient) Delete(ctx context.Context, name string) error {
 	return c.dyn.Resource(SparkConnectGVR).Namespace(c.namespace).Delete(ctx, name, metav1.DeleteOptions{})
+}
+
+// Events lists Kubernetes events whose involvedObject belongs to the cluster
+// (the CR itself or its "<cr>-server" / "<cr>-exec-*" pods).
+func (c *dynamicClient) Events(ctx context.Context, crName string) ([]Event, error) {
+	list, err := c.dyn.Resource(eventsGVR).Namespace(c.namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	events := make([]Event, 0, len(list.Items))
+	for i := range list.Items {
+		obj := list.Items[i].Object
+		name, _, _ := unstructured.NestedString(obj, "involvedObject", "name")
+		if name != crName && !strings.HasPrefix(name, crName+"-") {
+			continue
+		}
+		typ, _, _ := unstructured.NestedString(obj, "type")
+		reason, _, _ := unstructured.NestedString(obj, "reason")
+		msg, _, _ := unstructured.NestedString(obj, "message")
+		count, _, _ := unstructured.NestedInt64(obj, "count")
+		lastTS, _, _ := unstructured.NestedString(obj, "lastTimestamp")
+		var seen time.Time
+		if lastTS != "" {
+			seen, _ = time.Parse(time.RFC3339, lastTS)
+		}
+		events = append(events, Event{Type: typ, Reason: reason, Message: msg, Object: name, Count: count, LastSeen: seen})
+	}
+	return events, nil
+}
+
+// DriverLogs returns up to tailLines of the driver (server) pod's logs. The
+// operator names the server pod "<cr>-server" (live-validated).
+func (c *dynamicClient) DriverLogs(ctx context.Context, crName string, tailLines int64) (string, error) {
+	if c.clientset == nil {
+		return "", fmt.Errorf("driver logs unavailable: no kubernetes clientset configured")
+	}
+	opts := &corev1.PodLogOptions{Container: "spark-kubernetes-driver"}
+	if tailLines > 0 {
+		opts.TailLines = &tailLines
+	}
+	data, err := c.clientset.CoreV1().Pods(c.namespace).GetLogs(crName+"-server", opts).DoRaw(ctx)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// Metrics is best-effort: without metrics-server wired it reports unavailable
+// rather than failing (documented stub; SPEC-004b permits this).
+func (c *dynamicClient) Metrics(_ context.Context, _ string) (Metrics, error) {
+	return Metrics{Available: false}, nil
 }

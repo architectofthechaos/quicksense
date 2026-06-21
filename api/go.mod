@@ -9,6 +9,7 @@ require (
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/jackc/pgx/v5 v5.7.1
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0
+	k8s.io/api v0.32.6
 	k8s.io/apimachinery v0.32.6
 	k8s.io/client-go v0.32.6
 )
@@ -30,6 +31,7 @@ require (
 	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
+	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect

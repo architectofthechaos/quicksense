@@ -337,3 +337,42 @@ func TestDeleteRemovesCR(t *testing.T) {
 		t.Fatalf("expected IsNotFound, got: %v", fetchErr)
 	}
 }
+
+func TestEventsFiltersByClusterName(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	evGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "events"}
+	fdyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+		k8s.SparkConnectGVR: "SparkConnectList",
+		evGVR:               "EventList",
+	})
+	client := k8s.NewSparkConnectClient(fdyn, "quicksense")
+
+	mkEvent := func(objName, reason string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion":     "v1",
+			"kind":           "Event",
+			"metadata":       map[string]interface{}{"name": objName + "-ev", "namespace": "quicksense"},
+			"type":           "Normal",
+			"reason":         reason,
+			"message":        "msg",
+			"involvedObject": map[string]interface{}{"name": objName},
+		}}
+	}
+	for _, e := range []*unstructured.Unstructured{mkEvent("qs-c1-server", "Scheduled"), mkEvent("unrelated-x", "Other")} {
+		if _, err := fdyn.Resource(evGVR).Namespace("quicksense").Create(ctx, e, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("seed event: %v", err)
+		}
+	}
+
+	got, err := client.Events(ctx, "qs-c1")
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 event for qs-c1, got %d: %+v", len(got), got)
+	}
+	if got[0].Reason != "Scheduled" {
+		t.Errorf("reason: got %q, want Scheduled", got[0].Reason)
+	}
+}

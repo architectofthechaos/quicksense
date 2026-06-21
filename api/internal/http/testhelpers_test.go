@@ -242,6 +242,9 @@ type fakeK8s struct {
 	createErr    error            // returned by Create when set
 	getStatus    k8s.ClusterStatus // returned by Get when not in notFoundNames
 	notFoundNames map[string]bool  // Get returns k8s NotFound for these names
+
+	events []k8s.Event // returned by Events
+	logs   string      // returned by DriverLogs
 }
 
 func newFakeK8s() *fakeK8s {
@@ -280,6 +283,22 @@ func (f *fakeK8s) Delete(_ context.Context, name string) error {
 	defer f.mu.Unlock()
 	f.deleteCalls = append(f.deleteCalls, name)
 	return nil
+}
+
+func (f *fakeK8s) Events(_ context.Context, _ string) ([]k8s.Event, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.events, nil
+}
+
+func (f *fakeK8s) DriverLogs(_ context.Context, _ string, _ int64) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.logs, nil
+}
+
+func (f *fakeK8s) Metrics(_ context.Context, _ string) (k8s.Metrics, error) {
+	return k8s.Metrics{Available: false}, nil
 }
 
 func (f *fakeK8s) createCount() int {
