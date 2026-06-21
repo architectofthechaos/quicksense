@@ -76,3 +76,29 @@ func TestDownMigrationContainsExpectedStatements(t *testing.T) {
 		}
 	}
 }
+
+// TestMigration0002AddsClusterConfig verifies the 4b migration is embedded and
+// adds the config/lifecycle columns.
+func TestMigration0002AddsClusterConfig(t *testing.T) {
+	for _, f := range []string{
+		"migrations/0002_clusters_config.up.sql",
+		"migrations/0002_clusters_config.down.sql",
+	} {
+		data, err := fs.ReadFile(store.MigrationsFS, f)
+		if err != nil {
+			t.Fatalf("expected embedded file %q: %v", f, err)
+		}
+		if len(data) == 0 {
+			t.Errorf("embedded file %q is empty", f)
+		}
+	}
+	up, err := fs.ReadFile(store.MigrationsFS, "migrations/0002_clusters_config.up.sql")
+	if err != nil {
+		t.Fatalf("reading 0002 up: %v", err)
+	}
+	for _, col := range []string{"config", "pinned", "desired_state", "last_activity_at"} {
+		if !strings.Contains(string(up), col) {
+			t.Errorf("0002 up migration missing column %q", col)
+		}
+	}
+}

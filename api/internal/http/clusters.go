@@ -68,12 +68,15 @@ func generateCRName(userName string) (string, error) {
 
 // clusterResponse is the JSON shape returned to callers for a single cluster.
 type clusterResponse struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-	CRName    string `json:"cr_name"`
-	Phase     string `json:"phase"`
-	Ready     bool   `json:"ready"`
+	ID           string          `json:"id"`
+	Name         string          `json:"name"`
+	Namespace    string          `json:"namespace"`
+	CRName       string          `json:"cr_name"`
+	Phase        string          `json:"phase"`
+	Ready        bool            `json:"ready"`
+	Pinned       bool            `json:"pinned"`
+	DesiredState string          `json:"desired_state"`
+	Config       json.RawMessage `json:"config,omitempty"`
 }
 
 // toClusterResponse merges a store.Cluster row with the live k8s ClusterStatus.
@@ -83,12 +86,15 @@ func toClusterResponse(c store.Cluster, status k8s.ClusterStatus) clusterRespons
 		phase = status.Phase
 	}
 	return clusterResponse{
-		ID:        c.ID,
-		Name:      c.Name,
-		Namespace: c.Namespace,
-		CRName:    c.CRName,
-		Phase:     phase,
-		Ready:     status.Ready,
+		ID:           c.ID,
+		Name:         c.Name,
+		Namespace:    c.Namespace,
+		CRName:       c.CRName,
+		Phase:        phase,
+		Ready:        status.Ready,
+		Pinned:       c.Pinned,
+		DesiredState: c.DesiredState,
+		Config:       c.Config,
 	}
 }
 
@@ -147,42 +153,17 @@ func (h *clusterHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Image: advanced override falls back to the configured QuickSense Spark image.
-	image := h.sparkImage
-	if strings.TrimSpace(req.Image) != "" {
-		image = req.Image
-	}
-	// sparkConf: catalog/Iceberg wiring is the base; user conf overlays it.
-	sparkConf := make(map[string]string, len(h.sparkConf)+len(req.SparkConf))
-	for k, v := range h.sparkConf {
-		sparkConf[k] = v
-	}
-	for k, v := range req.SparkConf {
-		sparkConf[k] = v
-	}
-
-	_, err = h.k8s.Create(r.Context(), k8s.ClusterSpec{
-		Name:           crName,
-		Image:          image,
-		Executors:      h.defaultExec,
-		WorkerMin:      req.WorkerMin,
-		WorkerMax:      req.WorkerMax,
-		Driver:         req.Driver.toK8s(),
-		Executor:       req.Executor.toK8s(),
-		ServiceAccount: h.serviceAccount,
-		SparkConf:      sparkConf,
-		Env:            req.Env,
-		Tags:           req.Tags,
-	})
-	if err != nil {
+	if _, err = h.k8s.Create(r.Context(), h.buildSpec(crName, req)); err != nil {
 		WriteError(w, http.StatusBadGateway, "provision_error", "failed to provision SparkConnect CR: "+err.Error())
 		return
 	}
 
+	configJSON, _ := json.Marshal(req)
 	cluster, err := h.store.CreateCluster(r.Context(), store.CreateClusterParams{
 		Name:      req.Name,
 		Namespace: h.namespace,
 		CRName:    crName,
+		Config:    configJSON,
 	})
 	if err != nil {
 		// TODO: CR was created but DB row failed — compensation/rollback out of scope (B-future).
@@ -286,4 +267,196 @@ func (h *clusterHandler) delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------------------
+// 4b lifecycle: start / stop / restart / clone / pin (PATCH)
+// ---------------------------------------------------------------------------
+
+// buildSpec renders a k8s.ClusterSpec from a create config — image fallback +
+// catalog/user sparkConf merge. Shared by create / start / restart / clone so
+// a stopped cluster restarts with exactly its persisted desired config.
+func (h *clusterHandler) buildSpec(crName string, req createClusterReq) k8s.ClusterSpec {
+	image := h.sparkImage
+	if strings.TrimSpace(req.Image) != "" {
+		image = req.Image
+	}
+	sparkConf := make(map[string]string, len(h.sparkConf)+len(req.SparkConf))
+	for k, v := range h.sparkConf {
+		sparkConf[k] = v
+	}
+	for k, v := range req.SparkConf {
+		sparkConf[k] = v
+	}
+	return k8s.ClusterSpec{
+		Name:           crName,
+		Image:          image,
+		Executors:      h.defaultExec,
+		WorkerMin:      req.WorkerMin,
+		WorkerMax:      req.WorkerMax,
+		Driver:         req.Driver.toK8s(),
+		Executor:       req.Executor.toK8s(),
+		ServiceAccount: h.serviceAccount,
+		SparkConf:      sparkConf,
+		Env:            req.Env,
+		Tags:           req.Tags,
+	}
+}
+
+// loadConfig unmarshals a cluster's persisted create config (tolerant of empty).
+func loadConfig(c *store.Cluster) createClusterReq {
+	var req createClusterReq
+	if len(c.Config) > 0 {
+		_ = json.Unmarshal(c.Config, &req)
+	}
+	return req
+}
+
+// getClusterOr404 fetches a cluster, writing 404/500 and returning nil on failure.
+func (h *clusterHandler) getClusterOr404(w http.ResponseWriter, r *http.Request, id string) *store.Cluster {
+	c, err := h.store.GetCluster(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			WriteError(w, http.StatusNotFound, "not_found", "cluster not found")
+		} else {
+			WriteError(w, http.StatusInternalServerError, "store_error", "failed to get cluster")
+		}
+		return nil
+	}
+	return c
+}
+
+// respondCluster re-reads the row + live status and writes it at the given code.
+func (h *clusterHandler) respondCluster(w http.ResponseWriter, r *http.Request, id string, code int) {
+	c, err := h.store.GetCluster(r.Context(), id)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "store_error", "failed to load cluster")
+		return
+	}
+	status, _ := h.k8s.Get(r.Context(), c.CRName)
+	WriteJSON(w, code, toClusterResponse(*c, status))
+}
+
+// start (re)provisions the CR from stored config and marks desired_state Running.
+func (h *clusterHandler) start(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	c := h.getClusterOr404(w, r, id)
+	if c == nil {
+		return
+	}
+	if _, err := h.k8s.Create(r.Context(), h.buildSpec(c.CRName, loadConfig(c))); err != nil && !k8serrors.IsAlreadyExists(err) {
+		WriteError(w, http.StatusBadGateway, "provision_error", "failed to start cluster: "+err.Error())
+		return
+	}
+	_, _ = h.store.SetClusterDesiredState(r.Context(), id, "Running")
+	_ = h.store.TouchClusterActivity(r.Context(), id)
+	h.respondCluster(w, r, id, http.StatusOK)
+}
+
+// stop deletes the CR (keeping the row + config) and marks desired_state Stopped.
+func (h *clusterHandler) stop(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	c := h.getClusterOr404(w, r, id)
+	if c == nil {
+		return
+	}
+	if err := h.k8s.Delete(r.Context(), c.CRName); err != nil && !k8serrors.IsNotFound(err) {
+		WriteError(w, http.StatusBadGateway, "provision_error", "failed to stop cluster: "+err.Error())
+		return
+	}
+	_, _ = h.store.SetClusterDesiredState(r.Context(), id, "Stopped")
+	h.respondCluster(w, r, id, http.StatusOK)
+}
+
+// restart deletes then recreates the CR from stored config.
+func (h *clusterHandler) restart(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	c := h.getClusterOr404(w, r, id)
+	if c == nil {
+		return
+	}
+	if err := h.k8s.Delete(r.Context(), c.CRName); err != nil && !k8serrors.IsNotFound(err) {
+		WriteError(w, http.StatusBadGateway, "provision_error", "failed to restart (stop phase): "+err.Error())
+		return
+	}
+	if _, err := h.k8s.Create(r.Context(), h.buildSpec(c.CRName, loadConfig(c))); err != nil && !k8serrors.IsAlreadyExists(err) {
+		WriteError(w, http.StatusBadGateway, "provision_error", "failed to restart (start phase): "+err.Error())
+		return
+	}
+	_, _ = h.store.SetClusterDesiredState(r.Context(), id, "Running")
+	_ = h.store.TouchClusterActivity(r.Context(), id)
+	h.respondCluster(w, r, id, http.StatusOK)
+}
+
+// clone provisions a new cluster (new row + CR) from a source cluster's config.
+func (h *clusterHandler) clone(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	src := h.getClusterOr404(w, r, id)
+	if src == nil {
+		return
+	}
+	req := loadConfig(src)
+	var body struct {
+		Name string `json:"name"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body) // empty body is fine
+	newName := strings.TrimSpace(body.Name)
+	if newName == "" {
+		newName = src.Name + "-clone"
+	}
+	req.Name = newName
+
+	crName, err := generateCRName(newName)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "internal_error", "failed to generate cluster name")
+		return
+	}
+	if _, err := h.k8s.Create(r.Context(), h.buildSpec(crName, req)); err != nil {
+		WriteError(w, http.StatusBadGateway, "provision_error", "failed to clone cluster: "+err.Error())
+		return
+	}
+	configJSON, _ := json.Marshal(req)
+	cluster, err := h.store.CreateCluster(r.Context(), store.CreateClusterParams{
+		Name:      newName,
+		Namespace: h.namespace,
+		CRName:    crName,
+		Config:    configJSON,
+	})
+	if err != nil {
+		log.Printf("WARN: clone CR %q created but DB insert failed: %v", crName, err)
+		WriteError(w, http.StatusInternalServerError, "store_error", "cluster cloned but metadata save failed")
+		return
+	}
+	WriteJSON(w, http.StatusCreated, toClusterResponse(*cluster, k8s.ClusterStatus{}))
+}
+
+// patch updates pin state and/or the persisted config (config takes effect on
+// the next start/restart). Body: {"pinned": bool, "config": {<createClusterReq>}}.
+func (h *clusterHandler) patch(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if c := h.getClusterOr404(w, r, id); c == nil {
+		return
+	}
+	var body struct {
+		Pinned *bool             `json:"pinned"`
+		Config *createClusterReq `json:"config"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		WriteError(w, http.StatusBadRequest, "invalid_json", "request body must be valid JSON")
+		return
+	}
+	if body.Pinned != nil {
+		if _, err := h.store.SetClusterPinned(r.Context(), id, *body.Pinned); err != nil {
+			WriteError(w, http.StatusInternalServerError, "store_error", "failed to update pin")
+			return
+		}
+	}
+	if body.Config != nil {
+		cfgJSON, _ := json.Marshal(body.Config)
+		if _, err := h.store.UpdateClusterConfig(r.Context(), id, cfgJSON); err != nil {
+			WriteError(w, http.StatusInternalServerError, "store_error", "failed to update config")
+			return
+		}
+	}
+	h.respondCluster(w, r, id, http.StatusOK)
 }

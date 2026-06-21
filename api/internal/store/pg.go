@@ -4,6 +4,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/jackc/pgx/v5"
@@ -105,69 +106,66 @@ func (s *PgStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 
 // ---- Cluster methods ----
 
+// clusterColumns is the canonical SELECT/RETURNING column list for clusters,
+// in the order scanCluster expects.
+const clusterColumns = `id, workspace_id, name, namespace, cr_name, phase,
+	COALESCE(connect_url, ''), config, pinned, desired_state, last_activity_at,
+	created_at, updated_at`
+
+// scanCluster scans one row (in clusterColumns order) into a *Cluster, mapping
+// pgx errors to store sentinels. Works for both QueryRow and a *pgx.Rows cursor.
+func scanCluster(row pgx.Row) (*Cluster, error) {
+	var c Cluster
+	var wsID pgtype.Text
+	if err := row.Scan(
+		&c.ID, &wsID, &c.Name, &c.Namespace, &c.CRName, &c.Phase,
+		&c.ConnectURL, &c.Config, &c.Pinned, &c.DesiredState, &c.LastActivityAt,
+		&c.CreatedAt, &c.UpdatedAt,
+	); err != nil {
+		return nil, mapPgError(err)
+	}
+	if wsID.Valid {
+		c.WorkspaceID = wsID.String
+	}
+	return &c, nil
+}
+
+// jsonbArg returns config as a string for a $n::jsonb param, or nil so a
+// COALESCE default applies (avoids binding []byte, which pgx encodes as bytea).
+func jsonbArg(config json.RawMessage) any {
+	if len(config) == 0 {
+		return nil
+	}
+	return string(config)
+}
+
 // CreateCluster inserts a new cluster record and returns it.
 // Maps unique-constraint violations (cr_name or workspace_id+name) to ErrConflict.
 // When p.WorkspaceID is empty, SQL NULL is bound so Postgres does not reject
 // the empty string as an invalid UUID (error code 22P02).
 func (s *PgStore) CreateCluster(ctx context.Context, p CreateClusterParams) (*Cluster, error) {
-	const q = `
-		INSERT INTO clusters (workspace_id, name, namespace, cr_name)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, workspace_id, name, namespace, cr_name, phase,
-		          COALESCE(connect_url, ''), created_at, updated_at`
+	q := `INSERT INTO clusters (workspace_id, name, namespace, cr_name, config)
+		VALUES ($1, $2, $3, $4, COALESCE($5::jsonb, '{}'::jsonb))
+		RETURNING ` + clusterColumns
 
 	var workspaceID any
 	if p.WorkspaceID != "" {
 		workspaceID = p.WorkspaceID
 	} // nil → SQL NULL
 
-	var c Cluster
-	var wsID pgtype.Text
-	err := s.pool.QueryRow(ctx, q,
-		workspaceID, p.Name, p.Namespace, p.CRName,
-	).Scan(
-		&c.ID, &wsID, &c.Name, &c.Namespace, &c.CRName, &c.Phase,
-		&c.ConnectURL, &c.CreatedAt, &c.UpdatedAt,
-	)
-	if err != nil {
-		return nil, mapPgError(err)
-	}
-	if wsID.Valid {
-		c.WorkspaceID = wsID.String
-	}
-	return &c, nil
+	return scanCluster(s.pool.QueryRow(ctx, q, workspaceID, p.Name, p.Namespace, p.CRName, jsonbArg(p.Config)))
 }
 
 // GetCluster retrieves a cluster by its UUID string.
 // Returns ErrNotFound if no row matches.
 func (s *PgStore) GetCluster(ctx context.Context, id string) (*Cluster, error) {
-	const q = `
-		SELECT id, workspace_id, name, namespace, cr_name, phase,
-		       COALESCE(connect_url, ''), created_at, updated_at
-		FROM clusters WHERE id = $1`
-
-	var c Cluster
-	var wsID pgtype.Text
-	err := s.pool.QueryRow(ctx, q, id).Scan(
-		&c.ID, &wsID, &c.Name, &c.Namespace, &c.CRName, &c.Phase,
-		&c.ConnectURL, &c.CreatedAt, &c.UpdatedAt,
-	)
-	if err != nil {
-		return nil, mapPgError(err)
-	}
-	if wsID.Valid {
-		c.WorkspaceID = wsID.String
-	}
-	return &c, nil
+	q := `SELECT ` + clusterColumns + ` FROM clusters WHERE id = $1`
+	return scanCluster(s.pool.QueryRow(ctx, q, id))
 }
 
 // ListClusters returns all clusters ordered by creation time.
 func (s *PgStore) ListClusters(ctx context.Context) ([]Cluster, error) {
-	const q = `
-		SELECT id, workspace_id, name, namespace, cr_name, phase,
-		       COALESCE(connect_url, ''), created_at, updated_at
-		FROM clusters ORDER BY created_at ASC`
-
+	q := `SELECT ` + clusterColumns + ` FROM clusters ORDER BY created_at ASC`
 	rows, err := s.pool.Query(ctx, q)
 	if err != nil {
 		return nil, mapPgError(err)
@@ -176,18 +174,11 @@ func (s *PgStore) ListClusters(ctx context.Context) ([]Cluster, error) {
 
 	var result []Cluster
 	for rows.Next() {
-		var c Cluster
-		var wsID pgtype.Text
-		if err := rows.Scan(
-			&c.ID, &wsID, &c.Name, &c.Namespace, &c.CRName, &c.Phase,
-			&c.ConnectURL, &c.CreatedAt, &c.UpdatedAt,
-		); err != nil {
+		c, err := scanCluster(rows)
+		if err != nil {
 			return nil, err
 		}
-		if wsID.Valid {
-			c.WorkspaceID = wsID.String
-		}
-		result = append(result, c)
+		result = append(result, *c)
 	}
 	return result, rows.Err()
 }
@@ -195,26 +186,39 @@ func (s *PgStore) ListClusters(ctx context.Context) ([]Cluster, error) {
 // UpdateClusterPhase sets a new phase and optional connect URL on a cluster.
 // Returns ErrNotFound if no row matches.
 func (s *PgStore) UpdateClusterPhase(ctx context.Context, id string, phase ClusterPhase, connectURL string) (*Cluster, error) {
-	const q = `
-		UPDATE clusters
-		SET phase = $2, connect_url = NULLIF($3, ''), updated_at = now()
-		WHERE id = $1
-		RETURNING id, workspace_id, name, namespace, cr_name, phase,
-		          COALESCE(connect_url, ''), created_at, updated_at`
+	q := `UPDATE clusters SET phase = $2, connect_url = NULLIF($3, ''), updated_at = now()
+		WHERE id = $1 RETURNING ` + clusterColumns
+	return scanCluster(s.pool.QueryRow(ctx, q, id, string(phase), connectURL))
+}
 
-	var c Cluster
-	var wsID pgtype.Text
-	err := s.pool.QueryRow(ctx, q, id, string(phase), connectURL).Scan(
-		&c.ID, &wsID, &c.Name, &c.Namespace, &c.CRName, &c.Phase,
-		&c.ConnectURL, &c.CreatedAt, &c.UpdatedAt,
-	)
+// UpdateClusterConfig replaces the persisted create config (for PATCH/edit).
+func (s *PgStore) UpdateClusterConfig(ctx context.Context, id string, config json.RawMessage) (*Cluster, error) {
+	q := `UPDATE clusters SET config = $2::jsonb, updated_at = now() WHERE id = $1 RETURNING ` + clusterColumns
+	return scanCluster(s.pool.QueryRow(ctx, q, id, string(config)))
+}
+
+// SetClusterDesiredState records Start/Stop intent ("Running" | "Stopped").
+func (s *PgStore) SetClusterDesiredState(ctx context.Context, id, desiredState string) (*Cluster, error) {
+	q := `UPDATE clusters SET desired_state = $2, updated_at = now() WHERE id = $1 RETURNING ` + clusterColumns
+	return scanCluster(s.pool.QueryRow(ctx, q, id, desiredState))
+}
+
+// SetClusterPinned toggles the pin flag (exclude from idle auto-terminate).
+func (s *PgStore) SetClusterPinned(ctx context.Context, id string, pinned bool) (*Cluster, error) {
+	q := `UPDATE clusters SET pinned = $2, updated_at = now() WHERE id = $1 RETURNING ` + clusterColumns
+	return scanCluster(s.pool.QueryRow(ctx, q, id, pinned))
+}
+
+// TouchClusterActivity bumps last_activity_at (called on attach/run/lifecycle).
+func (s *PgStore) TouchClusterActivity(ctx context.Context, id string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE clusters SET last_activity_at = now() WHERE id = $1`, id)
 	if err != nil {
-		return nil, mapPgError(err)
+		return mapPgError(err)
 	}
-	if wsID.Valid {
-		c.WorkspaceID = wsID.String
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
 	}
-	return &c, nil
+	return nil
 }
 
 // DeleteCluster removes a cluster by ID.

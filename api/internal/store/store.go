@@ -7,6 +7,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -31,15 +32,19 @@ type Workspace struct {
 
 // Cluster is a SparkConnect cluster record stored in Postgres.
 type Cluster struct {
-	ID          string
-	WorkspaceID string
-	Name        string
-	Namespace   string
-	CRName      string
-	Phase       ClusterPhase
-	ConnectURL  string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID             string
+	WorkspaceID    string
+	Name           string
+	Namespace      string
+	CRName         string
+	Phase          ClusterPhase
+	ConnectURL     string
+	Config         json.RawMessage // 4b: persisted create config (workers/resources/conf/env/tags/idle)
+	Pinned         bool            // 4b: excluded from idle auto-terminate
+	DesiredState   string          // 4b: "Running" | "Stopped"
+	LastActivityAt time.Time       // 4b: bumped on attach/run/lifecycle; drives idle reconcile
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // CreateClusterParams carries the input required to create a new cluster record.
@@ -48,6 +53,7 @@ type CreateClusterParams struct {
 	Name        string
 	Namespace   string
 	CRName      string
+	Config      json.RawMessage // full create config, persisted for lifecycle re-rendering
 }
 
 // ErrNotFound is returned when a requested resource does not exist in the store.
@@ -74,4 +80,10 @@ type Store interface {
 	ListClusters(ctx context.Context) ([]Cluster, error)
 	UpdateClusterPhase(ctx context.Context, id string, phase ClusterPhase, connectURL string) (*Cluster, error)
 	DeleteCluster(ctx context.Context, id string) error
+
+	// 4b lifecycle/config mutations.
+	UpdateClusterConfig(ctx context.Context, id string, config json.RawMessage) (*Cluster, error)
+	SetClusterDesiredState(ctx context.Context, id, desiredState string) (*Cluster, error)
+	SetClusterPinned(ctx context.Context, id string, pinned bool) (*Cluster, error)
+	TouchClusterActivity(ctx context.Context, id string) error
 }

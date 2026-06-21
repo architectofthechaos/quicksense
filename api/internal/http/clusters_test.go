@@ -485,3 +485,122 @@ func TestGetCluster_ToleratesK8sNotFound(t *testing.T) {
 		t.Fatalf("expected phase 'Unknown', got %v", resp["phase"])
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 4b: lifecycle — start / stop / restart / clone / pin + config persistence
+// ---------------------------------------------------------------------------
+
+func seedConfigured(fs *fakeStore, id, crName string, cfg map[string]any) {
+	b, _ := json.Marshal(cfg)
+	fs.seed(&store.Cluster{
+		ID: id, Name: cfg["name"].(string), Namespace: "quicksense", CRName: crName,
+		Phase: store.ClusterPhaseRunning, Config: b, DesiredState: "Running",
+		LastActivityAt: time.Now(), CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	})
+}
+
+func TestPostCluster_PersistsConfig(t *testing.T) {
+	fs := newFakeStore()
+	fk := newFakeK8s()
+	mux := clusterMux(fs, fk)
+
+	body, _ := json.Marshal(map[string]any{"name": "p", "worker_min": 2, "worker_max": 4})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodPost, "/v1/clusters", body))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Config json.RawMessage `json:"config"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !bytes.Contains(resp.Config, []byte("worker_min")) {
+		t.Errorf("create response should echo persisted config; got %s", resp.Config)
+	}
+}
+
+func TestStopCluster(t *testing.T) {
+	fs := newFakeStore()
+	fk := newFakeK8s()
+	seedConfigured(fs, "c1", "qs-c1", map[string]any{"name": "c1"})
+	mux := clusterMux(fs, fk)
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodPost, "/v1/clusters/c1/stop", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if fk.deleteCount() != 1 {
+		t.Errorf("stop should delete the CR; deleteCount=%d", fk.deleteCount())
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["desired_state"] != "Stopped" {
+		t.Errorf("desired_state: got %v, want Stopped", resp["desired_state"])
+	}
+}
+
+func TestStartCluster_RebuildsFromConfig(t *testing.T) {
+	fs := newFakeStore()
+	fk := newFakeK8s()
+	seedConfigured(fs, "c1", "qs-c1", map[string]any{"name": "c1", "worker_min": 3, "worker_max": 6})
+	mux := clusterMux(fs, fk)
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodPost, "/v1/clusters/c1/start", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	fk.mu.Lock()
+	spec := fk.createCalls[len(fk.createCalls)-1]
+	fk.mu.Unlock()
+	if spec.WorkerMin != 3 || spec.WorkerMax != 6 {
+		t.Errorf("start must rebuild the CR from stored config: min=%d max=%d", spec.WorkerMin, spec.WorkerMax)
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["desired_state"] != "Running" {
+		t.Errorf("desired_state: got %v, want Running", resp["desired_state"])
+	}
+}
+
+func TestCloneCluster(t *testing.T) {
+	fs := newFakeStore()
+	fk := newFakeK8s()
+	seedConfigured(fs, "c1", "qs-c1", map[string]any{"name": "c1", "worker_min": 2})
+	mux := clusterMux(fs, fk)
+
+	body, _ := json.Marshal(map[string]string{"name": "c1-copy"})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodPost, "/v1/clusters/c1/clone", body))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if fs.count() != 2 {
+		t.Errorf("clone should add a row; count=%d", fs.count())
+	}
+	if fk.createCount() != 1 {
+		t.Errorf("clone should create one new CR; createCount=%d", fk.createCount())
+	}
+}
+
+func TestPatchCluster_Pin(t *testing.T) {
+	fs := newFakeStore()
+	fk := newFakeK8s()
+	seedConfigured(fs, "c1", "qs-c1", map[string]any{"name": "c1"})
+	mux := clusterMux(fs, fk)
+
+	body, _ := json.Marshal(map[string]any{"pinned": true})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodPatch, "/v1/clusters/c1", body))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["pinned"] != true {
+		t.Errorf("pinned: got %v, want true", resp["pinned"])
+	}
+}

@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -107,14 +108,17 @@ func (f *fakeStore) CreateCluster(_ context.Context, p store.CreateClusterParams
 	}
 	id := fmt.Sprintf("cluster-%d", len(f.clusters)+1)
 	c := &store.Cluster{
-		ID:          id,
-		WorkspaceID: p.WorkspaceID,
-		Name:        p.Name,
-		Namespace:   p.Namespace,
-		CRName:      p.CRName,
-		Phase:       store.ClusterPhasePending,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:             id,
+		WorkspaceID:    p.WorkspaceID,
+		Name:           p.Name,
+		Namespace:      p.Namespace,
+		CRName:         p.CRName,
+		Phase:          store.ClusterPhasePending,
+		Config:         p.Config,
+		DesiredState:   "Running",
+		LastActivityAt: time.Now(),
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 	f.clusters[id] = c
 	return c, nil
@@ -161,6 +165,53 @@ func (f *fakeStore) DeleteCluster(_ context.Context, id string) error {
 		return store.ErrNotFound
 	}
 	delete(f.clusters, id)
+	return nil
+}
+
+func (f *fakeStore) UpdateClusterConfig(_ context.Context, id string, config json.RawMessage) (*store.Cluster, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, ok := f.clusters[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	c.Config = config
+	cp := *c
+	return &cp, nil
+}
+
+func (f *fakeStore) SetClusterDesiredState(_ context.Context, id, desiredState string) (*store.Cluster, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, ok := f.clusters[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	c.DesiredState = desiredState
+	cp := *c
+	return &cp, nil
+}
+
+func (f *fakeStore) SetClusterPinned(_ context.Context, id string, pinned bool) (*store.Cluster, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, ok := f.clusters[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	c.Pinned = pinned
+	cp := *c
+	return &cp, nil
+}
+
+func (f *fakeStore) TouchClusterActivity(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, ok := f.clusters[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	c.LastActivityAt = time.Now()
 	return nil
 }
 

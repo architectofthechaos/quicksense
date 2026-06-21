@@ -63,6 +63,11 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 		r.Get("/clusters", clh.list)
 		r.Get("/clusters/{id}", clh.get)
 		r.Delete("/clusters/{id}", clh.delete)
+		r.Patch("/clusters/{id}", clh.patch)
+		r.Post("/clusters/{id}/start", clh.start)
+		r.Post("/clusters/{id}/stop", clh.stop)
+		r.Post("/clusters/{id}/restart", clh.restart)
+		r.Post("/clusters/{id}/clone", clh.clone)
 	})
 
 	return r
