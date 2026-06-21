@@ -9,6 +9,8 @@ package k8s
 
 import (
 	"context"
+	"sort"
+	"strconv"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,9 +38,24 @@ var statusStatePath = []string{"status", "state"}
 type ClusterSpec struct {
 	Name           string
 	Image          string
-	Executors      int32
+	Executors      int32             // explicit executor count when WorkerMin is unset
+	WorkerMin      int32             // min executors (seeds instances + dynamicAllocation.minExecutors)
+	WorkerMax      int32             // max executors (enables dynamicAllocation when > min)
+	Driver         Resources         // driver (server) pod CPU/memory
+	Executor       Resources         // per-executor pod CPU/memory
 	ServiceAccount string            // Kubernetes ServiceAccount for the driver pod
-	SparkConf      map[string]string // Iceberg / catalog sparkConf entries
+	SparkConf      map[string]string // Iceberg / catalog sparkConf entries (user conf merged in)
+	Env            map[string]string // env vars set on both driver + executor containers
+	Tags           map[string]string // free-form tags, surfaced as quicksense.io/<k> annotations
+}
+
+// Resources describes a container's CPU/memory requests and limits. Empty
+// fields are omitted from the CR (the operator / K8s defaults then apply).
+type Resources struct {
+	CPURequest    string
+	CPULimit      string
+	MemoryRequest string
+	MemoryLimit   string
 }
 
 // ClusterStatus is the observed state of a SparkConnect cluster.
@@ -83,10 +100,25 @@ func NewSparkConnectClient(dyn dynamic.Interface, namespace string) SparkConnect
 //
 // The operator names the gRPC Service <cr-name>-server on port 15002.
 func buildCR(s ClusterSpec, namespace string) *unstructured.Unstructured {
-	// Build sparkConf as map[string]interface{} for unstructured encoding.
-	sparkConf := make(map[string]interface{}, len(s.SparkConf))
+	// Copy user sparkConf so autoscaling merges don't mutate the caller's map.
+	sparkConf := make(map[string]interface{}, len(s.SparkConf)+4)
 	for k, v := range s.SparkConf {
 		sparkConf[k] = v
+	}
+
+	// Executor count seeds from WorkerMin when set, else the explicit Executors.
+	instances := s.Executors
+	if s.WorkerMin > 0 {
+		instances = s.WorkerMin
+	}
+
+	// min < max ⇒ enable Spark dynamic allocation between the two bounds. User
+	// sparkConf wins (setIfAbsent) so an explicit override is never clobbered.
+	if s.WorkerMax > 0 && s.WorkerMax > instances {
+		setIfAbsent(sparkConf, "spark.dynamicAllocation.enabled", "true")
+		setIfAbsent(sparkConf, "spark.dynamicAllocation.shuffleTracking.enabled", "true")
+		setIfAbsent(sparkConf, "spark.dynamicAllocation.minExecutors", strconv.Itoa(int(instances)))
+		setIfAbsent(sparkConf, "spark.dynamicAllocation.maxExecutors", strconv.Itoa(int(s.WorkerMax)))
 	}
 
 	// Container entries — one for the driver (server) and one for the executor.
@@ -100,6 +132,16 @@ func buildCR(s ClusterSpec, namespace string) *unstructured.Unstructured {
 		"image":           s.Image,
 		"imagePullPolicy": "IfNotPresent",
 	}
+	if res := resourceRequirements(s.Driver); res != nil {
+		driverContainer["resources"] = res
+	}
+	if res := resourceRequirements(s.Executor); res != nil {
+		executorContainer["resources"] = res
+	}
+	if env := envVars(s.Env); env != nil {
+		driverContainer["env"] = env
+		executorContainer["env"] = env
+	}
 
 	// server spec — serviceAccountName + containers list.
 	serverTemplateSpec := map[string]interface{}{
@@ -109,17 +151,22 @@ func buildCR(s ClusterSpec, namespace string) *unstructured.Unstructured {
 		serverTemplateSpec["serviceAccountName"] = s.ServiceAccount
 	}
 
+	metadata := map[string]interface{}{
+		"name":      s.Name,
+		"namespace": namespace,
+		"labels": map[string]interface{}{
+			"app.kubernetes.io/managed-by": "quicksense",
+		},
+	}
+	if ann := tagAnnotations(s.Tags); ann != nil {
+		metadata["annotations"] = ann
+	}
+
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": SparkConnectGVR.Group + "/" + SparkConnectGVR.Version,
 			"kind":       "SparkConnect",
-			"metadata": map[string]interface{}{
-				"name":      s.Name,
-				"namespace": namespace,
-				"labels": map[string]interface{}{
-					"app.kubernetes.io/managed-by": "quicksense",
-				},
-			},
+			"metadata":   metadata,
 			// Full template form required for kind-loaded images.
 			// sparkVersion is required by the CRD; sparkConf carries catalog wiring.
 			"spec": map[string]interface{}{
@@ -131,7 +178,7 @@ func buildCR(s ClusterSpec, namespace string) *unstructured.Unstructured {
 					},
 				},
 				"executor": map[string]interface{}{
-					"instances": int64(s.Executors),
+					"instances": int64(instances),
 					"template": map[string]interface{}{
 						"spec": map[string]interface{}{
 							"containers": []interface{}{executorContainer},
@@ -141,6 +188,75 @@ func buildCR(s ClusterSpec, namespace string) *unstructured.Unstructured {
 			},
 		},
 	}
+}
+
+// setIfAbsent sets m[k]=v only when k is not already present, so user-supplied
+// sparkConf always takes precedence over derived defaults.
+func setIfAbsent(m map[string]interface{}, k, v string) {
+	if _, ok := m[k]; !ok {
+		m[k] = v
+	}
+}
+
+// resourceRequirements renders a Resources into the container `resources` map,
+// omitting empty fields. Returns nil when nothing is set.
+func resourceRequirements(r Resources) map[string]interface{} {
+	requests := map[string]interface{}{}
+	if r.CPURequest != "" {
+		requests["cpu"] = r.CPURequest
+	}
+	if r.MemoryRequest != "" {
+		requests["memory"] = r.MemoryRequest
+	}
+	limits := map[string]interface{}{}
+	if r.CPULimit != "" {
+		limits["cpu"] = r.CPULimit
+	}
+	if r.MemoryLimit != "" {
+		limits["memory"] = r.MemoryLimit
+	}
+	res := map[string]interface{}{}
+	if len(requests) > 0 {
+		res["requests"] = requests
+	}
+	if len(limits) > 0 {
+		res["limits"] = limits
+	}
+	if len(res) == 0 {
+		return nil
+	}
+	return res
+}
+
+// envVars renders env as a key-sorted slice of {name,value} maps, so equal
+// specs produce byte-identical CRs (deterministic, test-friendly).
+func envVars(env map[string]string) []interface{} {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]interface{}, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, map[string]interface{}{"name": k, "value": env[k]})
+	}
+	return out
+}
+
+// tagAnnotations renders free-form tags as quicksense.io/<key> annotations,
+// which (unlike labels) accept arbitrary values.
+func tagAnnotations(tags map[string]string) map[string]interface{} {
+	if len(tags) == 0 {
+		return nil
+	}
+	out := make(map[string]interface{}, len(tags))
+	for k, v := range tags {
+		out["quicksense.io/"+k] = v
+	}
+	return out
 }
 
 // Create builds and submits a SparkConnect CR, returning the created CR's name.

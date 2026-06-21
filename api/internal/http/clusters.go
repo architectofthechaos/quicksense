@@ -92,6 +92,38 @@ func toClusterResponse(c store.Cluster, status k8s.ClusterStatus) clusterRespons
 	}
 }
 
+// resourcesReq is the JSON shape for per-container CPU/memory in the create body.
+type resourcesReq struct {
+	CPURequest    string `json:"cpu_request"`
+	CPULimit      string `json:"cpu_limit"`
+	MemoryRequest string `json:"memory_request"`
+	MemoryLimit   string `json:"memory_limit"`
+}
+
+func (r resourcesReq) toK8s() k8s.Resources {
+	return k8s.Resources{
+		CPURequest:    r.CPURequest,
+		CPULimit:      r.CPULimit,
+		MemoryRequest: r.MemoryRequest,
+		MemoryLimit:   r.MemoryLimit,
+	}
+}
+
+// createClusterReq is the K8s-native cluster create body (identical everywhere —
+// pod resources against existing cluster capacity; no cloud/instance fields).
+type createClusterReq struct {
+	Name        string            `json:"name"`
+	WorkerMin   int32             `json:"worker_min"`
+	WorkerMax   int32             `json:"worker_max"`
+	Driver      resourcesReq      `json:"driver"`
+	Executor    resourcesReq      `json:"executor"`
+	Image       string            `json:"image"`        // advanced override; default = QuickSense Spark image
+	IdleMinutes int               `json:"idle_minutes"` // auto-terminate; persisted with migration 0002
+	SparkConf   map[string]string `json:"spark_conf"`
+	Env         map[string]string `json:"env"`
+	Tags        map[string]string `json:"tags"`
+}
+
 // create handles POST /v1/clusters.
 // It generates a CR name, provisions a SparkConnect CR, then records the row
 // in the store. If the k8s call fails, 502 is returned. If the DB insert fails
@@ -99,9 +131,7 @@ func toClusterResponse(c store.Cluster, status k8s.ClusterStatus) clusterRespons
 // out of scope for this sprint.
 // TODO: add rollback/compensation if DB insert fails after k8s CR creation (B-future).
 func (h *clusterHandler) create(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Name string `json:"name"`
-	}
+	var req createClusterReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		WriteError(w, http.StatusBadRequest, "invalid_json", "request body must be valid JSON")
 		return
@@ -117,12 +147,32 @@ func (h *clusterHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Image: advanced override falls back to the configured QuickSense Spark image.
+	image := h.sparkImage
+	if strings.TrimSpace(req.Image) != "" {
+		image = req.Image
+	}
+	// sparkConf: catalog/Iceberg wiring is the base; user conf overlays it.
+	sparkConf := make(map[string]string, len(h.sparkConf)+len(req.SparkConf))
+	for k, v := range h.sparkConf {
+		sparkConf[k] = v
+	}
+	for k, v := range req.SparkConf {
+		sparkConf[k] = v
+	}
+
 	_, err = h.k8s.Create(r.Context(), k8s.ClusterSpec{
 		Name:           crName,
-		Image:          h.sparkImage,
+		Image:          image,
 		Executors:      h.defaultExec,
+		WorkerMin:      req.WorkerMin,
+		WorkerMax:      req.WorkerMax,
+		Driver:         req.Driver.toK8s(),
+		Executor:       req.Executor.toK8s(),
 		ServiceAccount: h.serviceAccount,
-		SparkConf:      h.sparkConf,
+		SparkConf:      sparkConf,
+		Env:            req.Env,
+		Tags:           req.Tags,
 	})
 	if err != nil {
 		WriteError(w, http.StatusBadGateway, "provision_error", "failed to provision SparkConnect CR: "+err.Error())

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -35,7 +35,7 @@ func TestCreateProducesCRWithExpectedSpec(t *testing.T) {
 		ServiceAccount: "spark-operator-spark",
 		SparkConf: map[string]string{
 			"spark.sql.defaultCatalog": "quicksense",
-			"spark.sql.extensions":    "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
+			"spark.sql.extensions":     "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
 		},
 	}
 
@@ -204,6 +204,109 @@ func TestGetNotReadyPhaseIsNotReady(t *testing.T) {
 	}
 	if status.Ready {
 		t.Errorf("Ready: got true, want false ('NotReady' must not count as ready)")
+	}
+}
+
+// --- 4b: production pod resources, autoscaling, env, tags ---
+
+func firstContainer(t *testing.T, obj *unstructured.Unstructured, path ...string) map[string]interface{} {
+	t.Helper()
+	cs, found, err := unstructured.NestedSlice(obj.Object, path...)
+	if err != nil || !found || len(cs) == 0 {
+		t.Fatalf("containers missing at %v: found=%v err=%v", path, found, err)
+	}
+	m, ok := cs[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("container[0] not a map: %T", cs[0])
+	}
+	return m
+}
+
+func assertResource(t *testing.T, c map[string]interface{}, kind, res, want string) {
+	t.Helper()
+	r, _ := c["resources"].(map[string]interface{})
+	k, _ := r[kind].(map[string]interface{})
+	if got, _ := k[res].(string); got != want {
+		t.Errorf("resources.%s.%s: got %q, want %q", kind, res, got, want)
+	}
+}
+
+func assertEnv(t *testing.T, c map[string]interface{}, name, want string) {
+	t.Helper()
+	env, _ := c["env"].([]interface{})
+	for _, e := range env {
+		m, _ := e.(map[string]interface{})
+		if m["name"] == name {
+			if m["value"] != want {
+				t.Errorf("env %s: got %v, want %q", name, m["value"], want)
+			}
+			return
+		}
+	}
+	t.Errorf("env var %q not found on container", name)
+}
+
+func TestCreateProducesProductionResourcesAndAutoscaling(t *testing.T) {
+	ctx := context.Background()
+	fdyn := newFakeDyn()
+	client := k8s.NewSparkConnectClient(fdyn, "quicksense")
+
+	spec := k8s.ClusterSpec{
+		Name:      "prod",
+		Image:     "quicksense-spark:dev",
+		WorkerMin: 2,
+		WorkerMax: 5,
+		Driver:    k8s.Resources{CPURequest: "1", CPULimit: "2", MemoryRequest: "2Gi", MemoryLimit: "4Gi"},
+		Executor:  k8s.Resources{CPURequest: "2", CPULimit: "4", MemoryRequest: "4Gi", MemoryLimit: "8Gi"},
+		Env:       map[string]string{"FOO": "bar"},
+		Tags:      map[string]string{"team": "data"},
+		SparkConf: map[string]string{"spark.sql.defaultCatalog": "quicksense"},
+	}
+	if _, err := client.Create(ctx, spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := fdyn.Resource(k8s.SparkConnectGVR).Namespace("quicksense").Get(ctx, "prod", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+
+	// executor.instances seeds from the min worker count.
+	if inst, _, _ := unstructured.NestedInt64(got.Object, "spec", "executor", "instances"); inst != 2 {
+		t.Errorf("executor.instances: got %d, want 2", inst)
+	}
+
+	// min<max ⇒ dynamic allocation wired into sparkConf.
+	for k, want := range map[string]string{
+		"spark.dynamicAllocation.enabled":      "true",
+		"spark.dynamicAllocation.minExecutors": "2",
+		"spark.dynamicAllocation.maxExecutors": "5",
+	} {
+		v, found, _ := unstructured.NestedString(got.Object, "spec", "sparkConf", k)
+		if !found || v != want {
+			t.Errorf("sparkConf[%s]: got %q (found=%v), want %q", k, v, found, want)
+		}
+	}
+	// user sparkConf preserved.
+	if v, _, _ := unstructured.NestedString(got.Object, "spec", "sparkConf", "spark.sql.defaultCatalog"); v != "quicksense" {
+		t.Errorf("user sparkConf clobbered: defaultCatalog=%q", v)
+	}
+
+	// driver resources + env.
+	dc := firstContainer(t, got, "spec", "server", "template", "spec", "containers")
+	assertResource(t, dc, "requests", "cpu", "1")
+	assertResource(t, dc, "limits", "memory", "4Gi")
+	assertEnv(t, dc, "FOO", "bar")
+
+	// executor resources + env.
+	ec := firstContainer(t, got, "spec", "executor", "template", "spec", "containers")
+	assertResource(t, ec, "requests", "memory", "4Gi")
+	assertResource(t, ec, "limits", "cpu", "4")
+	assertEnv(t, ec, "FOO", "bar")
+
+	// tags surface as annotations (arbitrary values, no label-syntax constraints).
+	ann, _, _ := unstructured.NestedStringMap(got.Object, "metadata", "annotations")
+	if ann["quicksense.io/team"] != "data" {
+		t.Errorf("tag annotation quicksense.io/team: got %q, want data", ann["quicksense.io/team"])
 	}
 }
 

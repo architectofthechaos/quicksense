@@ -83,6 +83,57 @@ func TestPostCluster_Created(t *testing.T) {
 	}
 }
 
+// 4b: the create handler must map the full request body (workers, driver/executor
+// resources, image override, env, tags, user sparkConf) into the k8s.ClusterSpec.
+func TestPostCluster_PassesProductionConfigToK8s(t *testing.T) {
+	fs := newFakeStore()
+	fk := newFakeK8s()
+	mux := clusterMux(fs, fk)
+
+	body, _ := json.Marshal(map[string]any{
+		"name":       "prod",
+		"worker_min": 2,
+		"worker_max": 5,
+		"driver":     map[string]string{"cpu_request": "1", "memory_request": "2Gi", "cpu_limit": "2", "memory_limit": "4Gi"},
+		"executor":   map[string]string{"cpu_request": "2", "memory_request": "4Gi"},
+		"image":      "custom-spark:9",
+		"spark_conf": map[string]string{"spark.foo": "bar"},
+		"env":        map[string]string{"E": "v"},
+		"tags":       map[string]string{"team": "data"},
+	})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodPost, "/v1/clusters", body))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d; body: %s", w.Code, w.Body.String())
+	}
+
+	fk.mu.Lock()
+	spec := fk.createCalls[0]
+	fk.mu.Unlock()
+
+	if spec.WorkerMin != 2 || spec.WorkerMax != 5 {
+		t.Errorf("workers: got min=%d max=%d, want 2/5", spec.WorkerMin, spec.WorkerMax)
+	}
+	if spec.Driver.CPURequest != "1" || spec.Driver.MemoryLimit != "4Gi" {
+		t.Errorf("driver resources not propagated: %+v", spec.Driver)
+	}
+	if spec.Executor.MemoryRequest != "4Gi" {
+		t.Errorf("executor resources not propagated: %+v", spec.Executor)
+	}
+	if spec.Image != "custom-spark:9" {
+		t.Errorf("image override not applied: got %q", spec.Image)
+	}
+	if spec.Env["E"] != "v" {
+		t.Errorf("env not propagated: %+v", spec.Env)
+	}
+	if spec.Tags["team"] != "data" {
+		t.Errorf("tags not propagated: %+v", spec.Tags)
+	}
+	if spec.SparkConf["spark.foo"] != "bar" {
+		t.Errorf("user sparkConf not merged: %+v", spec.SparkConf)
+	}
+}
+
 func TestPostCluster_BadJSON(t *testing.T) {
 	fs := newFakeStore()
 	fk := newFakeK8s()
