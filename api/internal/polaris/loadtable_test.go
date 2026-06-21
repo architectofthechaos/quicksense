@@ -93,7 +93,14 @@ func TestLoadTable(t *testing.T) {
 	}
 }
 
-func TestForwardsCallerTokenPerUser(t *testing.T) {
+// TestUsesServiceTokenNotCallerToken locks in the 4e decision: Polaris always
+// authenticates with its own service credential, even when a caller token is
+// present in context. Forwarding the caller's Keycloak token to Polaris would
+// require a single shared issuer (or RFC 8693 token-exchange); the dev split
+// issuer (API verifies localhost:8082, Polaris's OIDC expects keycloak:8082)
+// makes a forwarded token fail Polaris validation. Per-user Polaris attribution
+// is deferred to token-exchange. (Trino per-user via X-Trino-User works today.)
+func TestUsesServiceTokenNotCallerToken(t *testing.T) {
 	var gotAuth string
 	tokenCalls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -114,15 +121,15 @@ func TestForwardsCallerTokenPerUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewHTTPClient: %v", err)
 	}
-	// A caller token in context ⇒ forward it (per-user), do NOT fetch a service token.
+	// A caller token in context must NOT leak to Polaris — the service token is used.
 	ctx := auth.ContextWithToken(context.Background(), "caller-jwt")
 	if _, err := c.ListCatalogs(ctx); err != nil {
 		t.Fatalf("ListCatalogs: %v", err)
 	}
-	if gotAuth != "Bearer caller-jwt" {
-		t.Errorf("Authorization: got %q, want Bearer caller-jwt", gotAuth)
+	if gotAuth != "Bearer service" {
+		t.Errorf("Authorization: got %q, want Bearer service (caller token must not leak)", gotAuth)
 	}
-	if tokenCalls != 0 {
-		t.Errorf("must not fetch a service token when forwarding the caller token; got %d", tokenCalls)
+	if tokenCalls == 0 {
+		t.Errorf("expected the service token to be fetched; got %d token calls", tokenCalls)
 	}
 }

@@ -22,21 +22,15 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/deepiq/quicksense/api/internal/auth"
 )
 
-// bearer returns the caller's forwarded bearer token (per-user identity, 4e)
-// when present in ctx — Polaris external OIDC maps it to that user's principal —
-// else the cached service token (client-credentials).
-func (c *HTTPClient) bearer(ctx context.Context) (string, error) {
-	if tok, ok := auth.TokenFromContext(ctx); ok {
-		return tok, nil
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.tokenLocked(ctx)
-}
+// NOTE (4e per-user identity): forwarding the caller's Keycloak token to Polaris
+// is the intended attribution path, but it requires a single shared issuer (or
+// RFC 8693 token-exchange). This dev setup runs a split issuer (the API verifies
+// localhost:8082 for browser tokens; Polaris's OIDC expects keycloak:8082), so a
+// forwarded token fails Polaris validation. Polaris therefore uses its service
+// credential here; per-user Polaris attribution lands with token-exchange.
+// (Trino per-user attribution via X-Trino-User works today — see internal/trino.)
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -257,7 +251,9 @@ func (c *HTTPClient) fetchToken(ctx context.Context) (string, error) {
 // ---------------------------------------------------------------------------
 
 func (c *HTTPClient) doManagement(ctx context.Context, method, path string, reqBody io.Reader) (*http.Response, []byte, error) {
-	tok, err := c.bearer(ctx)
+	c.mu.Lock()
+	tok, err := c.tokenLocked(ctx)
+	c.mu.Unlock()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -288,7 +284,9 @@ func (c *HTTPClient) doManagement(ctx context.Context, method, path string, reqB
 
 // doCatalog is like doManagement but for the Iceberg catalog API.
 func (c *HTTPClient) doCatalog(ctx context.Context, method, path string, reqBody io.Reader) (*http.Response, []byte, error) {
-	tok, err := c.bearer(ctx)
+	c.mu.Lock()
+	tok, err := c.tokenLocked(ctx)
+	c.mu.Unlock()
 	if err != nil {
 		return nil, nil, err
 	}
