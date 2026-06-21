@@ -15,6 +15,7 @@ import (
 	"github.com/deepiq/quicksense/api/internal/k8s"
 	"github.com/deepiq/quicksense/api/internal/polaris"
 	"github.com/deepiq/quicksense/api/internal/store"
+	"github.com/deepiq/quicksense/api/internal/trino"
 )
 
 // RouterDeps is the dependency-injection bundle passed to NewRouter.
@@ -28,6 +29,8 @@ type RouterDeps struct {
 	SparkImage     string            // Spark container image
 	ServiceAccount string            // Kubernetes ServiceAccount for driver pods
 	SparkConf      map[string]string // Iceberg/catalog SparkConf entries
+	Trino          trino.Client      // 4c: sample-data reads (nil ⇒ sample endpoint returns 501)
+	TrinoCatalog   string            // 4c: Trino catalog the Polaris catalog maps to
 }
 
 // NewRouter builds and returns a configured chi.Mux.
@@ -48,10 +51,11 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 		r.Get("/catalogs", ch.list)
 		r.Post("/catalogs", ch.create)
 		r.Get("/catalogs/{catalog}/namespaces", ch.listNamespaces)
-		th := &tableHandler{polaris: deps.Polaris}
+		th := &tableHandler{polaris: deps.Polaris, trino: deps.Trino, trinoCatalog: deps.TrinoCatalog}
 		r.Get("/catalogs/{catalog}/namespaces/{namespace}/tables", th.list)
 		r.Post("/catalogs/{catalog}/namespaces/{namespace}/tables", th.create)
 		r.Get("/catalogs/{catalog}/namespaces/{namespace}/tables/{table}", th.get)
+		r.Get("/catalogs/{catalog}/namespaces/{namespace}/tables/{table}/sample", th.sample)
 		clh := &clusterHandler{
 			store:          deps.Store,
 			k8s:            deps.K8s,

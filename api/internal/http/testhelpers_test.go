@@ -17,6 +17,7 @@ import (
 	"github.com/deepiq/quicksense/api/internal/k8s"
 	"github.com/deepiq/quicksense/api/internal/polaris"
 	"github.com/deepiq/quicksense/api/internal/store"
+	"github.com/deepiq/quicksense/api/internal/trino"
 )
 
 // ---------------------------------------------------------------------------
@@ -80,6 +81,23 @@ func (f *fakePolaris) LoadTable(_ context.Context, catalog, namespace, table str
 	f.listedCatalog = catalog
 	f.listedNamespace = namespace
 	return f.tableMeta, nil
+}
+
+// fakeTrino records the last Sample call and returns a canned result.
+type fakeTrino struct {
+	result         *trino.Result
+	sampledCatalog string
+	sampledSchema  string
+	sampledTable   string
+	limit          int
+}
+
+func (f *fakeTrino) Sample(_ context.Context, catalog, schema, table string, limit int) (*trino.Result, error) {
+	f.sampledCatalog = catalog
+	f.sampledSchema = schema
+	f.sampledTable = table
+	f.limit = limit
+	return f.result, nil
 }
 
 // ---------------------------------------------------------------------------

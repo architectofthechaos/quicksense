@@ -29,6 +29,7 @@ import (
 	"github.com/deepiq/quicksense/api/internal/k8s"
 	"github.com/deepiq/quicksense/api/internal/polaris"
 	"github.com/deepiq/quicksense/api/internal/store"
+	"github.com/deepiq/quicksense/api/internal/trino"
 )
 
 func main() {
@@ -117,6 +118,8 @@ func main() {
 		SparkImage:     cfg.SparkImage,
 		ServiceAccount: cfg.SparkServiceAccount,
 		SparkConf:      cfg.CatalogSparkConf(),
+		Trino:          trino.NewHTTPClient(fmt.Sprintf("http://%s:%s", cfg.TrinoHost, cfg.TrinoPort), cfg.TrinoUser, &http.Client{Timeout: 30 * time.Second}),
+		TrinoCatalog:   cfg.TrinoCatalog,
 	})
 
 	// Idle auto-terminate: periodically stop Running, unpinned clusters past

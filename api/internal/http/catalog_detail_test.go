@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/deepiq/quicksense/api/internal/polaris"
+	"github.com/deepiq/quicksense/api/internal/trino"
 )
 
 func TestListNamespacesEndpoint(t *testing.T) {
@@ -56,5 +57,30 @@ func TestTableDetailEndpoint(t *testing.T) {
 	}
 	if fp.listedNamespace != "demo" {
 		t.Errorf("namespace passed to Polaris: %q", fp.listedNamespace)
+	}
+}
+
+func TestTableSampleEndpoint(t *testing.T) {
+	ft := &fakeTrino{result: &trino.Result{Columns: []string{"id"}, Rows: [][]any{{float64(1)}}}}
+	mux := NewRouter(RouterDeps{
+		Verifier:     fakeVerifier{},
+		Polaris:      &fakePolaris{},
+		Trino:        ft,
+		TrinoCatalog: "iceberg",
+	})
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodGet, "/v1/catalogs/quicksense/namespaces/demo/tables/events/sample?limit=5", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var res trino.Result
+	json.Unmarshal(w.Body.Bytes(), &res)
+	if len(res.Columns) != 1 || res.Columns[0] != "id" {
+		t.Errorf("columns: %+v", res.Columns)
+	}
+	// Polaris catalog → Trino catalog mapping; namespace → schema; limit honored.
+	if ft.sampledCatalog != "iceberg" || ft.sampledSchema != "demo" || ft.sampledTable != "events" || ft.limit != 5 {
+		t.Errorf("trino call: cat=%s schema=%s table=%s limit=%d", ft.sampledCatalog, ft.sampledSchema, ft.sampledTable, ft.limit)
 	}
 }

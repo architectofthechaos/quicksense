@@ -5,16 +5,20 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/deepiq/quicksense/api/internal/polaris"
+	"github.com/deepiq/quicksense/api/internal/trino"
 )
 
-// tableHandler proxies table operations to the Polaris client.
-// It contains no business logic — all validation and persistence is delegated.
+// tableHandler proxies table operations to the Polaris client, and sample-data
+// reads to Trino. It contains no business logic — all work is delegated.
 type tableHandler struct {
-	polaris polaris.Client
+	polaris      polaris.Client
+	trino        trino.Client
+	trinoCatalog string // Trino catalog name the Polaris catalog maps to (e.g. "iceberg")
 }
 
 // list handles GET /v1/catalogs/{catalog}/namespaces/{namespace}/tables.
@@ -65,4 +69,34 @@ func (h *tableHandler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, http.StatusOK, tm)
+}
+
+// sample handles GET /v1/catalogs/{catalog}/namespaces/{namespace}/tables/{table}/sample?limit=N.
+// It executes SELECT * ... LIMIT N via Trino. The Polaris catalog maps to the
+// configured Trino catalog (trinoCatalog); the namespace is the Trino schema.
+func (h *tableHandler) sample(w http.ResponseWriter, r *http.Request) {
+	if h.trino == nil {
+		WriteError(w, http.StatusNotImplemented, "unavailable", "sample data requires Trino, which is not configured")
+		return
+	}
+	namespace := chi.URLParam(r, "namespace")
+	table := chi.URLParam(r, "table")
+
+	limit := 100
+	if q := r.URL.Query().Get("limit"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	tc := h.trinoCatalog
+	if tc == "" {
+		tc = "iceberg"
+	}
+
+	res, err := h.trino.Sample(r.Context(), tc, namespace, table, limit)
+	if err != nil {
+		WriteError(w, http.StatusBadGateway, "trino_error", "sample query failed: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, res)
 }

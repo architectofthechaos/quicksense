@@ -69,6 +69,12 @@ type Config struct {
 	MinioSecretKey string // MINIO_ROOT_PASSWORD (default: minioadmin)
 	MinioRegion    string // MINIO_REGION (default: us-east-1)
 
+	// Trino settings for catalog sample-data reads (4c).
+	TrinoHost    string // TRINO_HOST (default: trino)
+	TrinoPort    string // TRINO_PORT (default: 8080)
+	TrinoUser    string // TRINO_USER (default: quicksense)
+	TrinoCatalog string // TRINO_CATALOG (default: iceberg) — Trino catalog the Polaris catalog maps to
+
 	// KubeconfigPath is the path to a kubeconfig file.
 	// Empty string means in-cluster config.
 	// Source: KUBECONFIG (default: "").
@@ -186,6 +192,12 @@ func LoadFrom(getenv func(string) string) (*Config, error) {
 	minioSecretKey := withDefault("MINIO_ROOT_PASSWORD", "minioadmin")
 	minioRegion := withDefault("MINIO_REGION", "us-east-1")
 
+	// Trino (4c) — all optional with defaults.
+	trinoHost := withDefault("TRINO_HOST", "trino")
+	trinoPort := withDefault("TRINO_PORT", "8080")
+	trinoUser := withDefault("TRINO_USER", "quicksense")
+	trinoCatalog := withDefault("TRINO_CATALOG", "iceberg")
+
 	return &Config{
 		PostgresHost:     pgHost,
 		PostgresUser:     pgUser,
@@ -221,5 +233,10 @@ func LoadFrom(getenv func(string) string) (*Config, error) {
 		MinioAccessKey: minioAccessKey,
 		MinioSecretKey: minioSecretKey,
 		MinioRegion:    minioRegion,
+
+		TrinoHost:    trinoHost,
+		TrinoPort:    trinoPort,
+		TrinoUser:    trinoUser,
+		TrinoCatalog: trinoCatalog,
 	}, nil
 }
