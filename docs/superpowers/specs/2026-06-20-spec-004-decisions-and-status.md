@@ -10,9 +10,11 @@
 ## 1. Overall progress
 
 ```
-SPEC-004  █████████████████░░░  ~85%
-4a Login ✅100%  4b Clusters ✅100%  4c Catalog ✅100%  4d Notebooks ◑~75%  4e AuthZ ◑~60%
+SPEC-004  ██████████████████░░  ~88%
+4a Login ✅100%  4b Clusters ✅100%  4c Catalog ✅100%  4d Notebooks ◑~75%  4e AuthZ ◑~70%
 ```
+
+Remaining is **infra-gated or net-new build**, not "just code I skipped": notebook **execution** needs a live Spark Connect cluster to verify; **per-user identity** needs live Polaris/Trino audit to verify; **Keycloak-admin** users/groups is net-new (client httptest-verifiable, screen is a UI build). Everything unit/integration-verifiable is done and green.
 
 | Phase | State | Evidence |
 |---|---|---|
@@ -88,12 +90,13 @@ a631c86 fix(e2e): Polaris bind idempotency + Keycloak issuer Host header + statu
 ## 7. Remaining work (resume checklist)
 Done since the last revision: ✅ notebooks UI, ✅ notebook ownership, ✅ server-side **notebook** permission enforcement (matrix tested), ✅ functional Permissions UI (clusters + notebooks).
 
+✅ Also done since: **4e cluster enforcement** (migration 0005 owner column + gate on all cluster handlers, matrix-tested).
+
 Still open:
-1. **4d execution (4d-1)** — the Python `pyspark[connect]` broker; wire `/run` to stream stdout/results/errors and bump cluster `last_activity_at`. **Infra-gated: spike against a live Spark Connect cluster before claiming done** (`/run` currently returns 501). *Biggest remaining feature.*
-2. **4e cluster enforcement** — mirror the notebook gate on cluster handlers. Mechanical, but needs an `owner` column on `clusters` (migration) so a creator auto-gets `manage` (notebooks already have this). Verifiable without infra.
-3. **4e per-user identity** — brokered per-user tokens so Polaris/Trino reads + Spark execution attribute to the real user (not the service principal). **Infra-gated** (needs live Polaris/Trino audit to verify).
-4. **4e Keycloak Admin** — admin client + `/v1/admin/users|groups` endpoints + the Users & Groups screen. Net-new; the client/endpoints are httptest-verifiable, the screen is a UI build.
-5. **Live smoke** — `task kind-up` end-to-end (kind theme mount, cluster lifecycle, catalog browse, notebook save). Paths are unit/integration-verified but not exercised together on a live cluster this session.
+1. **4d execution (4d-1)** — the Python `pyspark[connect]` broker; wire `/run` to stream stdout/results/errors and bump cluster `last_activity_at`. **Infra-gated: spike against a live Spark Connect cluster before claiming done** (`/run` returns 501). *Biggest remaining feature.*
+2. **4e per-user identity** — brokered per-user tokens so Polaris/Trino reads + Spark execution attribute to the real user (not the service principal). **Infra-gated** (needs live Polaris/Trino audit to verify).
+3. **4e Keycloak Admin** — admin client + `/v1/admin/users|groups` endpoints + the Users & Groups screen. Net-new; the client/endpoints are httptest-verifiable, the screen is a UI build.
+4. **Live smoke** — `task kind-up` end-to-end (kind theme mount, cluster lifecycle, catalog browse, notebook save). Paths are unit/integration-verified but not exercised together on a live cluster this session.
 
 ---
 
