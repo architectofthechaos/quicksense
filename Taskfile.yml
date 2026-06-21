@@ -117,6 +117,19 @@ tasks:
         kubectl apply -f deploy/k8s/api.yaml
         kubectl rollout status deploy/quicksense-api -n default --timeout=120s
 
+  broker-build:
+    desc: Build the Spark Connect execution broker image and load it into kind.
+    cmds:
+      - docker build -t quicksense-broker:latest -f docker/broker/Dockerfile .
+      - kind load docker-image quicksense-broker:latest --name quicksense
+
+  broker-run:
+    desc: Deploy the Spark Connect execution broker to the kind cluster.
+    cmds:
+      - kubectl config use-context kind-quicksense
+      - kubectl apply -f deploy/k8s/base/broker.yaml
+      - kubectl rollout status deploy/quicksense-broker -n default --timeout=180s
+
   api-e2e:
     desc: Run the API end-to-end test (Keycloak token → catalog/table → cluster → roundtrip → Trino).
     deps: [ensure-env]

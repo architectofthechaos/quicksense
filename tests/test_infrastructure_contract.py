@@ -718,3 +718,24 @@ def test_readme_documents_login_theme():
     readme = read("README.md")
     assert "themes/quicksense" in readme, "README must document the login theme location"
     assert "loginTheme" in readme or "login theme" in readme.lower()
+
+
+# ---------------------------------------------------------------------------
+# SPEC-004d-1: Spark Connect execution broker
+# ---------------------------------------------------------------------------
+
+
+def test_spark_connect_broker_files_exist():
+    for path in ["docker/broker/broker.py", "docker/broker/Dockerfile", "deploy/k8s/base/broker.yaml"]:
+        assert (ROOT / path).is_file(), f"missing {path}"
+    broker = read("docker/broker/broker.py")
+    assert "/run" in broker, "broker must expose /run"
+    assert "SparkSession.builder.remote" in broker, "broker must connect via Spark Connect"
+    manifest = read("deploy/k8s/base/broker.yaml")
+    assert "spark-broker" in manifest, "broker Service must be named spark-broker (matches BROKER_URL)"
+    assert "quicksense-broker" in manifest
+
+
+def test_taskfile_exposes_broker_targets():
+    tf = read("Taskfile.yml")
+    assert "broker-build:" in tf and "broker-run:" in tf

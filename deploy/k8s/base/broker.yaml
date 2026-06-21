@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: Apache-2.0
+# Spark Connect execution broker (4d-1). The API resolves a notebook's attached
+# cluster to sc://<cr>-server:15002 and POSTs cell code here; the broker runs it
+# via pyspark[connect]. Reachable in-cluster at http://spark-broker:8099.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quicksense-broker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: quicksense-broker
+  template:
+    metadata:
+      labels:
+        app: quicksense-broker
+    spec:
+      containers:
+        - name: broker
+          image: quicksense-broker:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8099
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8099
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-broker
+spec:
+  selector:
+    app: quicksense-broker
+  ports:
+    - port: 8099
+      targetPort: 8099
