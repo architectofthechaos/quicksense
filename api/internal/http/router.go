@@ -77,6 +77,18 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 		r.Get("/clusters/{id}/events", clh.events)
 		r.Get("/clusters/{id}/logs", clh.logs)
 		r.Get("/clusters/{id}/metrics", clh.metrics)
+
+		nh := &notebookHandler{store: deps.Store}
+		r.Post("/notebooks", nh.create)
+		r.Get("/notebooks", nh.list)
+		r.Get("/notebooks/{id}", nh.get)
+		r.Put("/notebooks/{id}", nh.update)
+		r.Delete("/notebooks/{id}", nh.trash)
+		r.Post("/notebooks/{id}/attach", nh.attach)
+		r.Get("/notebooks/{id}/revisions", nh.listRevisions)
+		r.Post("/notebooks/{id}/revisions", nh.saveRevision)
+		r.Post("/notebooks/{id}/revisions/{rev}/restore", nh.restoreRevision)
+		r.Get("/notebooks/{id}/export", nh.export)
 	})
 
 	return r
