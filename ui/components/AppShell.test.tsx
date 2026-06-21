@@ -29,6 +29,19 @@ describe("AppShell", () => {
     expect(screen.getByText("CONTENT")).toBeInTheDocument();
   });
 
+  it("renders content full-width (no centered max-w wrapper)", () => {
+    const { container } = render(
+      <AppShell username="qsuser">
+        <div>CONTENT</div>
+      </AppShell>,
+    );
+    // The enterprise console fills the viewport; there must be no max-w-5xl
+    // centering wrapper around the main content anymore (D3).
+    expect(container.querySelector(".max-w-5xl")).toBeNull();
+    const main = container.querySelector("main");
+    expect(main?.className).toContain("flex-1");
+  });
+
   it("reveals Log out via the user menu dropdown", () => {
     render(
       <AppShell username="qsuser">

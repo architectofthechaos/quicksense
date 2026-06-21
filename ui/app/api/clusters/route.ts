@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
-import { listClusters, createCluster, ApiClientError } from "@/lib/api";
+import { listClusters, createClusterFull, ApiClientError } from "@/lib/api";
+import { normalizeClusterConfig } from "@/lib/types";
 
 function unauthenticated() {
   return Response.json({ error: { code: "unauthenticated", message: "login required" } }, { status: 401 });
@@ -28,16 +29,21 @@ export async function POST(req: Request) {
   const session = await auth();
   const token = (session as any)?.access_token;
   if (!token) return unauthenticated();
-  let name = "";
+
+  let raw: Record<string, unknown>;
   try {
-    const body = await req.json();
-    name = (body?.name ?? "").trim();
+    raw = (await req.json()) ?? {};
   } catch {
     return Response.json({ error: { code: "invalid_json", message: "body must be JSON" } }, { status: 400 });
   }
-  if (!name) return Response.json({ error: { code: "missing_name", message: "name is required" } }, { status: 400 });
+  // Normalize the (possibly partial) body into a complete config so the upstream
+  // contract is always satisfied; name is required either way.
+  const config = normalizeClusterConfig(raw);
+  if (!config.name) {
+    return Response.json({ error: { code: "missing_name", message: "name is required" } }, { status: 400 });
+  }
   try {
-    const cluster = await createCluster(token, name);
+    const cluster = await createClusterFull(token, config);
     return Response.json(cluster, { status: 201 });
   } catch (e) {
     return errResponse(e);

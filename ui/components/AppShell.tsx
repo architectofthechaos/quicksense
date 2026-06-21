@@ -12,9 +12,9 @@ export function AppShell({ username, children }: { username: string; children: R
       </header>
       <div className="flex min-h-0 flex-1">
         <NavSidebar />
-        <main className="flex-1 overflow-auto px-8 py-7">
-          <div className="mx-auto max-w-5xl">{children}</div>
-        </main>
+        {/* Full-width fluid content area — the enterprise-console layout. Data
+            surfaces (tables, detail panels) manage their own width and density. */}
+        <main className="min-w-0 flex-1 overflow-auto px-8 py-7">{children}</main>
       </div>
     </div>
   );
