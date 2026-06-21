@@ -102,7 +102,9 @@ Done since the last revision: ✅ notebooks UI, ✅ notebook ownership, ✅ serv
 
 ## 8. Live smoke — end-to-end evidence (real kind cluster)
 
-Driven against the deployed branch images (API pod + `spark-broker` + Polaris + Trino + Keycloak) via the API on `localhost:8090`. Two identities used: the `quicksense-api` service account and `qsuser` (realm user, `polaris_admin` only — non-admin, non-owner).
+Driven against the deployed branch images (API pod + `spark-broker` + Polaris + Trino + Keycloak) via the API on `localhost:8090`. Two identities used: the `quicksense-api` service account and `qsuser` (realm user, `polaris_admin` only — non-admin, non-owner). **Re-confirmed 2026-06-21** via the documented deploy path (`kind load` → `task api-run` → `kubectl rollout restart` → fresh pod), all results below reproduced green.
+
+**Token issuer (verified A/B):** the API is configured (`deploy/k8s/api.yaml`) with `KEYCLOAK_ISSUER=http://localhost:8082/realms/quicksense` *by design* — browser-minted tokens carry the login host (`localhost:8082`), while the API fetches JWKS internally from `keycloak:8082`. Demonstrated live: a token minted with `Host: keycloak:8082` (`iss=keycloak:8082`) → **401** on `/v1/catalogs`; the same grant without the Host override (`iss=localhost:8082`) → **200**. So the smoke mints against `localhost:8082`. (Note: `scripts/k8s/api-e2e.sh` still defaults `KEYCLOAK_ISSUER_HOST=keycloak:8082` — only correct if that script also deploys the API with a matching issuer; the committed `deploy/k8s/api.yaml` uses `localhost:8082`.)
 
 | Flow | Call | Result |
 |---|---|---|
