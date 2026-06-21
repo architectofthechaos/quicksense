@@ -88,9 +88,18 @@ Kubernetes Service) with the following routes:
 | GET | `/v1/notebooks/{id}/export?format=ipynb\|py` | Yes | Export (4d) |
 | POST | `/v1/notebooks/{id}/run` | Yes | Cell execution (4d-1; 501 until the Spark Connect broker is wired) |
 | GET/PUT/DELETE | `/v1/notebooks/{id}/permissions` | Yes | Object-level grants (4e) |
+| GET/POST | `/v1/admin/users` | Admin | List / create users via Keycloak Admin API (4e) |
+| PUT | `/v1/admin/users/{id}/roles` | Admin | Assign a realm role (4e) |
+| GET/POST | `/v1/admin/groups` | Admin | List / create groups (4e) |
 
 All `/v1/*` routes require a valid Keycloak JWT (offline JWKS validation, RS256)
 carrying the `polaris_admin` realm role in `Authorization: Bearer <token>`.
+
+Object-level actions on clusters and notebooks are additionally enforced
+server-side against a Postgres permission store (4e): the owner gets `manage`,
+the `quicksense_admin` realm role gets `manage` on everything, otherwise the
+principal's granted level (direct or via a group) must meet the action's
+requirement. The `/v1/admin/*` identity routes require `quicksense_admin`.
 
 The API proxies catalog operations to Polaris using an internal service credential
 and manages compute lifecycle by creating/deleting `SparkConnect` custom resources
