@@ -93,6 +93,18 @@ func TestNotebookAttachCluster(t *testing.T) {
 	}
 }
 
+func TestNotebookRunNotImplemented(t *testing.T) {
+	fs := newFakeStore()
+	mux := notebookMux(fs)
+	id := createNotebook(t, mux, `{"cells":[]}`)
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodPost, "/v1/notebooks/"+id+"/run", mustJSON(map[string]any{"cell": 0})))
+	if w.Code != http.StatusNotImplemented {
+		t.Fatalf("run (broker not wired): expected 501, got %d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestNotebookExport(t *testing.T) {
 	fs := newFakeStore()
 	mux := notebookMux(fs)

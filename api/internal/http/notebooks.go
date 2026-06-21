@@ -268,6 +268,18 @@ func (h *notebookHandler) export(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// run handles POST /v1/notebooks/{id}/run — cell execution over Spark Connect.
+// The Python execution broker (pyspark[connect]) is the deferred 4d-1 spike; until
+// it is wired this returns 501 so the UI surfaces a clear "execution unavailable"
+// state rather than a hard error.
+func (h *notebookHandler) run(w http.ResponseWriter, r *http.Request) {
+	if h.getOr404(w, r, chi.URLParam(r, "id")) == nil {
+		return
+	}
+	WriteError(w, http.StatusNotImplemented, "execution_unavailable",
+		"cell execution requires the Spark Connect broker (not yet configured)")
+}
+
 // exportPy renders cells as a Jupytext-style .py with "# %%" cell markers.
 func exportPy(c nbContent) string {
 	var b strings.Builder
