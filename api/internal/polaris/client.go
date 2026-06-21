@@ -40,6 +40,38 @@ type Table struct {
 	Namespace string `json:"namespace"`
 }
 
+// Namespace is a dot-joined Iceberg namespace (e.g. "demo").
+type Namespace struct {
+	Name string `json:"name"`
+}
+
+// Column is one field of an Iceberg table schema.
+type Column struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Required bool   `json:"required"`
+	Doc      string `json:"doc,omitempty"`
+}
+
+// Snapshot is one entry of an Iceberg table's history.
+type Snapshot struct {
+	SnapshotID  int64  `json:"snapshot_id"`
+	TimestampMs int64  `json:"timestamp_ms"`
+	Operation   string `json:"operation"`
+}
+
+// TableMetadata is the normalized detail view of an Iceberg table (columns,
+// details, history) parsed from the Iceberg REST LoadTable response.
+type TableMetadata struct {
+	Location          string            `json:"location"`
+	Format            string            `json:"format"`
+	CurrentSnapshotID int64             `json:"current_snapshot_id"`
+	Columns           []Column          `json:"columns"`
+	PartitionFields   []string          `json:"partition_fields"`
+	Properties        map[string]string `json:"properties"`
+	Snapshots         []Snapshot        `json:"snapshots"`
+}
+
 // CreateCatalogParams carries the fields needed to create a Polaris catalog
 // with an S3-compatible (MinIO) storage config, mirroring the payload in
 // scripts/lib/bootstrap-common.sh:ensure_polaris_catalog.
@@ -83,8 +115,10 @@ func (e *APIError) Error() string {
 type Client interface {
 	ListCatalogs(ctx context.Context) ([]Catalog, error)
 	CreateCatalog(ctx context.Context, p CreateCatalogParams) (*Catalog, error)
+	ListNamespaces(ctx context.Context, catalog string) ([]Namespace, error)
 	ListTables(ctx context.Context, catalog, namespace string) ([]Table, error)
 	CreateTable(ctx context.Context, catalog, namespace string, p CreateTableParams) (*Table, error)
+	LoadTable(ctx context.Context, catalog, namespace, table string) (*TableMetadata, error)
 }
 
 // Compile-time interface check.
@@ -438,4 +472,140 @@ func (c *HTTPClient) CreateTable(ctx context.Context, catalog, namespace string,
 		return &Table{Name: p.Name, Namespace: namespace}, nil
 	}
 	return &Table{Name: p.Name, Namespace: namespace}, nil
+}
+
+// ListNamespaces lists namespaces in a catalog via the Iceberg REST API.
+// GET /api/catalog/v1/{catalog}/namespaces → {"namespaces":[["demo"],...]}.
+func (c *HTTPClient) ListNamespaces(ctx context.Context, catalog string) ([]Namespace, error) {
+	path := fmt.Sprintf("/api/catalog/v1/%s/namespaces", url.PathEscape(catalog))
+	resp, body, err := c.doCatalog(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, &APIError{Status: resp.StatusCode, Body: string(body)}
+	}
+	var result struct {
+		Namespaces [][]string `json:"namespaces"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("polaris: parse list-namespaces response: %w", err)
+	}
+	out := make([]Namespace, 0, len(result.Namespaces))
+	for _, parts := range result.Namespaces {
+		out = append(out, Namespace{Name: strings.Join(parts, ".")})
+	}
+	return out, nil
+}
+
+// LoadTable returns the normalized metadata (columns, details, history) for a
+// table via the Iceberg REST API.
+// GET /api/catalog/v1/{catalog}/namespaces/{namespace}/tables/{table}.
+func (c *HTTPClient) LoadTable(ctx context.Context, catalog, namespace, table string) (*TableMetadata, error) {
+	path := fmt.Sprintf("/api/catalog/v1/%s/namespaces/%s/tables/%s",
+		url.PathEscape(catalog), url.PathEscape(namespace), url.PathEscape(table))
+	resp, body, err := c.doCatalog(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, &APIError{Status: resp.StatusCode, Body: string(body)}
+	}
+	return parseTableMetadata(body)
+}
+
+// parseTableMetadata maps the Iceberg REST LoadTable response into TableMetadata.
+func parseTableMetadata(body []byte) (*TableMetadata, error) {
+	var r struct {
+		Metadata struct {
+			Location          string `json:"location"`
+			FormatVersion     int    `json:"format-version"`
+			CurrentSchemaID   int    `json:"current-schema-id"`
+			CurrentSnapshotID int64  `json:"current-snapshot-id"`
+			Schemas           []struct {
+				SchemaID int `json:"schema-id"`
+				Fields   []struct {
+					Name     string          `json:"name"`
+					Required bool            `json:"required"`
+					Type     json.RawMessage `json:"type"`
+					Doc      string          `json:"doc"`
+				} `json:"fields"`
+			} `json:"schemas"`
+			PartitionSpecs []struct {
+				Fields []struct {
+					Name string `json:"name"`
+				} `json:"fields"`
+			} `json:"partition-specs"`
+			Properties map[string]string `json:"properties"`
+			Snapshots  []struct {
+				SnapshotID  int64             `json:"snapshot-id"`
+				TimestampMs int64             `json:"timestamp-ms"`
+				Summary     map[string]string `json:"summary"`
+			} `json:"snapshots"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &r); err != nil {
+		return nil, fmt.Errorf("polaris: parse load-table response: %w", err)
+	}
+	m := r.Metadata
+	tm := &TableMetadata{
+		Location:          m.Location,
+		Format:            fmt.Sprintf("iceberg/v%d", m.FormatVersion),
+		CurrentSnapshotID: m.CurrentSnapshotID,
+		Properties:        m.Properties,
+	}
+
+	// Columns come from the current schema (fall back to the first).
+	fields := func() []struct {
+		Name     string          `json:"name"`
+		Required bool            `json:"required"`
+		Type     json.RawMessage `json:"type"`
+		Doc      string          `json:"doc"`
+	} {
+		for _, s := range m.Schemas {
+			if s.SchemaID == m.CurrentSchemaID {
+				return s.Fields
+			}
+		}
+		if len(m.Schemas) > 0 {
+			return m.Schemas[0].Fields
+		}
+		return nil
+	}()
+	for _, f := range fields {
+		tm.Columns = append(tm.Columns, Column{
+			Name: f.Name, Type: typeToString(f.Type), Required: f.Required, Doc: f.Doc,
+		})
+	}
+
+	if len(m.PartitionSpecs) > 0 {
+		for _, pf := range m.PartitionSpecs[0].Fields {
+			tm.PartitionFields = append(tm.PartitionFields, pf.Name)
+		}
+	}
+	for _, s := range m.Snapshots {
+		tm.Snapshots = append(tm.Snapshots, Snapshot{
+			SnapshotID: s.SnapshotID, TimestampMs: s.TimestampMs, Operation: s.Summary["operation"],
+		})
+	}
+	return tm, nil
+}
+
+// typeToString renders an Iceberg field type, which is either a primitive
+// string ("long") or a nested object (struct/list/map) whose kind is its "type".
+func typeToString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var obj struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(raw, &obj) == nil && obj.Type != "" {
+		return obj.Type
+	}
+	return string(raw)
 }

@@ -40,6 +40,8 @@ type fakePolaris struct {
 	catalogs        []polaris.Catalog
 	createdCatalog  polaris.CreateCatalogParams
 	tables          []polaris.Table
+	namespaces      []polaris.Namespace
+	tableMeta       *polaris.TableMetadata
 	listedCatalog   string
 	listedNamespace string
 	createdTable    polaris.CreateTableParams
@@ -67,6 +69,17 @@ func (f *fakePolaris) CreateTable(_ context.Context, catalog, namespace string, 
 	f.createdTNS = namespace
 	f.createdTable = p
 	return &polaris.Table{Name: p.Name, Namespace: namespace}, nil
+}
+
+func (f *fakePolaris) ListNamespaces(_ context.Context, catalog string) ([]polaris.Namespace, error) {
+	f.listedCatalog = catalog
+	return f.namespaces, nil
+}
+
+func (f *fakePolaris) LoadTable(_ context.Context, catalog, namespace, table string) (*polaris.TableMetadata, error) {
+	f.listedCatalog = catalog
+	f.listedNamespace = namespace
+	return f.tableMeta, nil
 }
 
 // ---------------------------------------------------------------------------

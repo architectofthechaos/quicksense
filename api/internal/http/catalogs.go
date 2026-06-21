@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/deepiq/quicksense/api/internal/polaris"
 )
 
@@ -25,6 +27,18 @@ func (h *catalogHandler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"catalogs": cats})
+}
+
+// listNamespaces handles GET /v1/catalogs/{catalog}/namespaces.
+// Returns: {"namespaces": [...]}
+func (h *catalogHandler) listNamespaces(w http.ResponseWriter, r *http.Request) {
+	catalog := chi.URLParam(r, "catalog")
+	ns, err := h.polaris.ListNamespaces(r.Context(), catalog)
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"namespaces": ns})
 }
 
 // create handles POST /v1/catalogs.

@@ -51,3 +51,18 @@ func (h *tableHandler) create(w http.ResponseWriter, r *http.Request) {
 	}
 	WriteJSON(w, http.StatusCreated, table)
 }
+
+// get handles GET /v1/catalogs/{catalog}/namespaces/{namespace}/tables/{table}.
+// Returns the normalized table metadata (columns, details, history).
+func (h *tableHandler) get(w http.ResponseWriter, r *http.Request) {
+	catalog := chi.URLParam(r, "catalog")
+	namespace := chi.URLParam(r, "namespace")
+	table := chi.URLParam(r, "table")
+
+	tm, err := h.polaris.LoadTable(r.Context(), catalog, namespace, table)
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, tm)
+}

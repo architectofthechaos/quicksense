@@ -47,9 +47,11 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 		ch := &catalogHandler{polaris: deps.Polaris}
 		r.Get("/catalogs", ch.list)
 		r.Post("/catalogs", ch.create)
+		r.Get("/catalogs/{catalog}/namespaces", ch.listNamespaces)
 		th := &tableHandler{polaris: deps.Polaris}
 		r.Get("/catalogs/{catalog}/namespaces/{namespace}/tables", th.list)
 		r.Post("/catalogs/{catalog}/namespaces/{namespace}/tables", th.create)
+		r.Get("/catalogs/{catalog}/namespaces/{namespace}/tables/{table}", th.get)
 		clh := &clusterHandler{
 			store:          deps.Store,
 			k8s:            deps.K8s,
