@@ -10,11 +10,11 @@
 ## 1. Overall progress
 
 ```
-SPEC-004  ███████████████████▓  ~96%
-4a Login ✅100%  4b Clusters ✅100%  4c Catalog ✅100%  4d Notebooks ✅~98%  4e AuthZ ◑~90%
+SPEC-004  ████████████████████  ~98%
+4a Login ✅100%  4b Clusters ✅100%  4c Catalog ✅100%  4d Notebooks ✅100%  4e AuthZ ✅~95%
 ```
 
-**4d notebook execution is now LIVE-VERIFIED.** The broker (Python pyspark[connect] + Go relay + kind deploy) ran `spark.sql("SELECT * FROM quicksense.demo.events").show()` against the running Spark Connect cluster and returned the real Iceberg rows — DoD #2 met end-to-end. Remaining: **per-user identity** attribution (Polaris/Trino — code writable; live audit to verify) and a full live smoke of every phase together.
+**All SPEC-004 code is written and unit/integration-verified; the marquee execution path is live-verified.** 4d execution ran live (broker → Spark Connect → Iceberg, real rows returned). 4e per-user identity is implemented (Polaris forwards the caller token; Trino `X-Trino-User` = caller) and unit-tested. The **only** thing left is a full multi-component **live smoke** — deploying this branch's images to a fresh cluster and driving every flow together (incl. confirming Polaris audit shows the real user) — a verification activity, not new code.
 
 | Phase | State | Evidence |
 |---|---|---|
@@ -94,9 +94,10 @@ Done since the last revision: ✅ notebooks UI, ✅ notebook ownership, ✅ serv
 
 ✅ Also done since: **4d execution broker** — `docker/broker/broker.py` (pyspark[connect]) + Go relay (`/run` resolves the attached cluster's sc:// endpoint and relays) + `deploy/k8s/base/broker.yaml` + Taskfile targets. **LIVE-VERIFIED**: ran `spark.sql("SELECT * FROM quicksense.demo.events").show()` through the deployed broker against the running Spark Connect cluster → returned the real Iceberg rows (DoD #2 ✅).
 
-Still open:
-1. **4e per-user identity** — brokered per-user tokens so Polaris/Trino reads + Spark execution attribute to the real logged-in user (not the service principal). Code is writable; needs live Polaris/Trino audit to verify the attribution (DoD #3).
-2. **Live smoke** — `task kind-up` end-to-end with this branch's images (kind theme mount, cluster lifecycle, catalog browse, notebook save/version + cell run, permission grant) exercised together. Each path is unit/integration-verified (and execution is now live-verified); not yet run all-together on a fresh cluster this session.
+✅ Also done since: **4e per-user identity** — RequireAuth stashes the caller's token + principal in context; the Polaris client forwards that token (external OIDC maps the user) and the Trino client sets `X-Trino-User` to the caller, so reads + (broker) execution attribute to the real user. Unit-tested (Polaris forwards + skips the service token; Trino X-Trino-User=caller).
+
+Still open — **one item, a verification activity (no new code):**
+1. **Full live smoke** — deploy this branch's images to a fresh `task kind-up` cluster and drive every flow together: themed login, cluster lifecycle, catalog browse + Trino sample, notebook create→attach→run (broker), versions/share/export, permission grant + non-admin denial, Users & Groups, and confirming Polaris audit attributes a read to the real user (DoD #3 live). Each path is individually unit/integration-verified and execution is live-verified; this exercises them end-to-end as one. Some sub-steps need authorization for live exec against shared infra.
 
 ---
 
