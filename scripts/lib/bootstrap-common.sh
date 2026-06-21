@@ -209,6 +209,15 @@ ensure_polaris_admin_principal_role() {
     200|201|204|409)
       echo "Bound Polaris principal role ${role_name} -> catalog-roles/catalog_admin on ${catalog}"
       ;;
+    500)
+      if grep -q "grant_records_pkey" "${bind_file}"; then
+        echo "Polaris principal role ${role_name} already bound to catalog-roles/catalog_admin on ${catalog}"
+      else
+        echo "Unexpected Polaris principal-role bind status ${bind_status}" >&2
+        cat "${bind_file}" >&2 || true
+        return 1
+      fi
+      ;;
     *)
       echo "Unexpected Polaris principal-role bind status ${bind_status}" >&2
       cat "${bind_file}" >&2 || true

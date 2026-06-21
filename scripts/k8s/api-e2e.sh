@@ -9,9 +9,9 @@
 #   3. POST /v1/catalogs/quicksense/namespaces/demo/tables — create the table.
 #   4. POST /v1/clusters   — create a SparkConnect cluster, capture id.
 #   5. Wait for the cluster to become Ready (kubectl wait + API poll).
-#   6. Resolve the operator-created Spark Connect Service name, port-forward it.
-#   7. SC_REMOTE=sc://localhost:15002 python3 spark_write.py
-#   8. TRINO_HOST=localhost ... python3 trino_read.py
+#   6. Resolve the operator-created Spark Connect Service name.
+#   7. Run spark_write.py as a Kubernetes Job using quicksense-spark:latest.
+#   8. Run trino_read.py as a Kubernetes Job using quicksense-trino-client:latest.
 #   9. echo "API E2E OK"
 #
 # Prerequisites (must already be running before this script):
@@ -30,14 +30,13 @@
 #   pods fail with UnknownHostException.  Live-verified: ROUNDTRIP OK.
 #
 # OPERATOR CONNECT SERVICE NOTE (RECONCILED-AT-LIVE-RUN):
-#   The Spark Operator creates a Service for each SparkConnect CR in `default`.
-#   The operator names it "<cr-name>-server" on port 15002 (verified live).
-#   At live run, inspect with:
+#   The Spark Operator creates a Service and pod for each SparkConnect CR in
+#   `default`. The operator names them "<cr-name>-server" on port 15002
+#   (verified live). At live run, inspect with:
 #     kubectl get svc -n default
 #   and set CONNECT_SVC_OVERRIDE=<actual-name> in the environment if needed.
-#   The round-trip client (spark_write.py in SC_REMOTE mode) requires the Spark
-#   Connect client deps; the quicksense-spark Dockerfile already bundles them
-#   (pyspark with connect extras), so running the client in that image works.
+#   The round-trip client (spark_write.py in SC_REMOTE mode) runs in the
+#   quicksense-spark image so it uses the same pinned Spark/Python dependencies.
 
 set -euo pipefail
 
@@ -100,6 +99,7 @@ KEYCLOAK_PORT="${KEYCLOAK_PORT:-8082}"
 KEYCLOAK_REALM="${KEYCLOAK_REALM:-quicksense}"
 KEYCLOAK_CLIENT_ID="${KEYCLOAK_CLIENT_ID:-quicksense-api}"
 KEYCLOAK_CLIENT_SECRET="${KEYCLOAK_CLIENT_SECRET:-qs-api-secret}"
+KEYCLOAK_ISSUER_HOST="${KEYCLOAK_ISSUER_HOST:-keycloak:${KEYCLOAK_PORT}}"
 TRINO_PORT="${TRINO_PORT:-8080}"
 API_NS="default"
 API_SVC="quicksense-api"
@@ -119,6 +119,7 @@ wait_for_http_local "Keycloak" "http://localhost:${KEYCLOAK_PORT}/realms/master"
 echo "==> Obtaining Keycloak token..."
 TOKEN_RESPONSE="$(curl --fail-with-body -sS \
   "http://localhost:${KEYCLOAK_PORT}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/token" \
+  -H "Host: ${KEYCLOAK_ISSUER_HOST}" \
   -d grant_type=client_credentials \
   -d client_id="${KEYCLOAK_CLIENT_ID}" \
   -d client_secret="${KEYCLOAK_CLIENT_SECRET}")"
@@ -209,29 +210,27 @@ echo "Cluster created (id=${CLUSTER_ID}, cr_name=${CR_NAME})."
 
 # ---------------------------------------------------------------------------
 # 7. Wait for the cluster to become Ready.
-#    The API GET /v1/clusters/{id} returns {"status":"ready"} when live.
-#    In parallel, wait on the SparkConnect CR via kubectl.
+#    The API GET /v1/clusters/{id} returns {"ready":true,"phase":"Ready"}
+#    when the operator reports .status.state=Ready.
 # ---------------------------------------------------------------------------
 echo "==> Waiting for cluster '${CLUSTER_ID}' (CR: ${CR_NAME}) to become Ready (up to 300 s)..."
 
 # The operator creates a Service named "<cr-name>-server" on port 15002.
 CONNECT_SVC="${CONNECT_SVC_OVERRIDE:-${CR_NAME}-server}"
 
-# Wait on the CR if the SparkConnect CRD is installed; fall back to API poll.
-if kubectl get crd sparkconnects.sparkoperator.k8s.io >/dev/null 2>&1; then
-  kubectl -n "${API_NS}" wait \
-    --for=condition=Ready \
-    "sparkconnect/${CR_NAME}" \
-    --timeout=300s || true  # non-fatal; API poll below is the authoritative check
-fi
-
-# API poll: GET /v1/clusters/{id} until ready == true or phase == "Running".
+# API poll: GET /v1/clusters/{id} until ready == true or phase is Ready/Running.
+# SparkConnect CRs expose readiness as .status.state, not condition=Ready.
 READY=false
 for _ in $(seq 1 60); do
   STATUS_JSON="$(curl -fsS "${API}/v1/clusters/${CLUSTER_ID}" \
     -H "Authorization: Bearer ${TOKEN}" 2>/dev/null || echo '{}')"
-  IS_READY="$(python3 -c 'import json,sys; d=json.load(sys.stdin); print("true" if d.get("ready") or d.get("phase","")=="Running" else "false")' <<<"${STATUS_JSON}" 2>/dev/null || echo 'false')"
+  IS_READY="$(python3 -c 'import json,sys; d=json.load(sys.stdin); print("true" if d.get("ready") or d.get("phase","") in ("Ready","Running") else "false")' <<<"${STATUS_JSON}" 2>/dev/null || echo 'false')"
   if [[ "${IS_READY}" == "true" ]]; then
+    READY=true
+    break
+  fi
+  CR_STATE="$(kubectl -n "${API_NS}" get sparkconnect "${CR_NAME}" -o jsonpath='{.status.state}' 2>/dev/null || true)"
+  if [[ "${CR_STATE}" == "Ready" ]]; then
     READY=true
     break
   fi
@@ -243,29 +242,74 @@ if [[ "${READY}" != "true" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 8. Port-forward the Spark Connect Service.
+# 8. Wait for the Spark Connect server pod and run spark_write.py in-cluster.
 # ---------------------------------------------------------------------------
-echo "==> Port-forwarding Spark Connect service '${CONNECT_SVC}' on 15002..."
-kubectl port-forward "svc/${CONNECT_SVC}" 15002:15002 -n "${API_NS}" &
-PF_PIDS+=($!)
-sleep 3  # give the port-forward a moment to establish
+echo "==> Waiting for Spark Connect server pod '${CONNECT_SVC}' to be Ready..."
+kubectl wait --for=condition=Ready "pod/${CONNECT_SVC}" -n "${API_NS}" --timeout=120s
+
+SPARK_WRITE_JOB="qs-api-e2e-spark-write"
+echo "==> Running spark_write.py via SC_REMOTE=sc://${CONNECT_SVC}:15002..."
+kubectl delete job "${SPARK_WRITE_JOB}" -n "${API_NS}" --ignore-not-found
+cat <<EOF | kubectl apply -n "${API_NS}" -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${SPARK_WRITE_JOB}
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: spark-write
+          image: quicksense-spark:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - python3
+            - /workspace/scripts/roundtrip/spark_write.py
+          env:
+            - name: SC_REMOTE
+              value: "sc://${CONNECT_SVC}:15002"
+            - name: PYTHONPATH
+              value: "/opt/spark/python:/opt/spark/python/lib/py4j-0.10.9.9-src.zip"
+          volumeMounts:
+            - name: roundtrip-scripts
+              mountPath: /workspace/scripts/roundtrip
+              readOnly: true
+      volumes:
+        - name: roundtrip-scripts
+          configMap:
+            name: roundtrip-scripts
+EOF
+kubectl wait --for=condition=complete "job/${SPARK_WRITE_JOB}" -n "${API_NS}" --timeout=300s || {
+  echo "spark_write Job did not complete:" >&2
+  kubectl logs "job/${SPARK_WRITE_JOB}" -n "${API_NS}" >&2 || true
+  exit 1
+}
+kubectl logs "job/${SPARK_WRITE_JOB}" -n "${API_NS}"
 
 # ---------------------------------------------------------------------------
-# 9. Run spark_write.py via the operator-managed Spark Connect cluster.
+# 9. Run trino_read.py in-cluster and verify ROUNDTRIP OK.
 # ---------------------------------------------------------------------------
-echo "==> Running spark_write.py via SC_REMOTE=sc://localhost:15002..."
-SC_REMOTE=sc://localhost:15002 python3 "${ROOT_DIR}/scripts/roundtrip/spark_write.py"
+echo "==> Waiting for Trino to be Ready..."
+kubectl rollout status deploy/trino -n "${API_NS}" --timeout=180s
+kubectl wait --for=condition=Ready pod -l app=trino -n "${API_NS}" --timeout=180s
 
-# ---------------------------------------------------------------------------
-# 10. Port-forward Trino and run trino_read.py.
-# ---------------------------------------------------------------------------
-echo "==> Port-forwarding Trino on ${TRINO_PORT}..."
-kubectl port-forward svc/trino "${TRINO_PORT}:${TRINO_PORT}" &
-PF_PIDS+=($!)
-wait_for_http_local "Trino" "http://localhost:${TRINO_PORT}/v1/info"
-
-echo "==> Running trino_read.py..."
-TRINO_HOST=localhost TRINO_PORT="${TRINO_PORT}" python3 "${ROOT_DIR}/scripts/roundtrip/trino_read.py"
+echo "==> Running trino_read.py via Kubernetes Job..."
+kubectl delete job trino-read -n "${API_NS}" --ignore-not-found
+kubectl apply -f deploy/k8s/base/trino-read-job.yaml
+kubectl wait --for=condition=complete job/trino-read -n "${API_NS}" --timeout=180s || {
+  echo "trino-read Job did not complete:" >&2
+  kubectl logs job/trino-read -n "${API_NS}" >&2 || true
+  exit 1
+}
+TRINO_LOGS="$(kubectl logs job/trino-read -n "${API_NS}")"
+echo "${TRINO_LOGS}"
+if ! echo "${TRINO_LOGS}" | grep -q "ROUNDTRIP OK"; then
+  echo "ERROR: ROUNDTRIP OK not found in trino_read.py output." >&2
+  exit 1
+fi
 
 # ---------------------------------------------------------------------------
 echo "API E2E OK"

@@ -515,6 +515,7 @@ def test_bootstrap_creates_polaris_admin_principal_role():
     assert '"admin"' in lib or 'name":"admin' in lib or "name\": \"admin" in lib
     assert "catalog-roles" in lib
     assert "ensure_polaris_admin_principal_role" in lib
+    assert "grant_records_pkey" in lib
 
     # Both call-sites must invoke the function
     bootstrap = read("scripts/bootstrap.sh")
@@ -537,6 +538,14 @@ def test_bootstrap_creates_polaris_external_principal():
 
     kind_bootstrap = read("scripts/k8s/kind-bootstrap.sh")
     assert "ensure_polaris_external_principal" in kind_bootstrap
+
+
+def test_api_e2e_requests_keycloak_token_with_cluster_host_header():
+    """api-e2e.sh must request its token with the in-cluster Keycloak Host header
+    so the JWT issuer matches the API/Polaris verifier issuer."""
+    script = read("scripts/k8s/api-e2e.sh")
+    assert "KEYCLOAK_ISSUER_HOST" in script
+    assert '-H "Host: ${KEYCLOAK_ISSUER_HOST}"' in script
 
 
 # ---------------------------------------------------------------------------
@@ -609,6 +618,9 @@ def test_api_e2e_and_assets():
         "/v1/clusters",
         "/v1/catalogs",
         "openid-connect/token",
+        '.status.state',
+        '"Ready","Running"',
+        "deploy/trino",
     ]:
         assert needle in e2e, f"Missing '{needle}' in api-e2e.sh"
 
