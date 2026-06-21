@@ -5,6 +5,14 @@ import type {
   ClusterEvent,
   ClusterEventsResponse,
   ClusterMetrics,
+  Catalog,
+  CatalogsResponse,
+  CatalogNamespace,
+  NamespacesResponse,
+  CatalogTable,
+  TablesResponse,
+  TableDetail,
+  TableSample,
   ApiError,
 } from "@/lib/types";
 
@@ -136,4 +144,66 @@ export async function clusterMetrics(token: string, id: string): Promise<Cluster
   const res = await apiFetch(`/v1/clusters/${encodeURIComponent(id)}/metrics`, token);
   if (!res.ok) throw await asError(res);
   return (await res.json()) as ClusterMetrics;
+}
+
+// ── Catalog (Phase 4c) ───────────────────────────────────────────────────────
+// Read-only Iceberg/Polaris browse + table detail. Each fn maps 1:1 to a Go
+// endpoint under /v1/catalogs and unwraps its envelope. Path segments are
+// URL-encoded; dot-joined namespaces (e.g. "analytics.sales") pass through as a
+// single segment, matching the Go contract.
+
+export async function listCatalogs(token: string): Promise<Catalog[]> {
+  const res = await apiFetch("/v1/catalogs", token);
+  if (!res.ok) throw await asError(res);
+  const body = (await res.json()) as CatalogsResponse;
+  return body.catalogs ?? [];
+}
+
+export async function listNamespaces(token: string, catalog: string): Promise<CatalogNamespace[]> {
+  const res = await apiFetch(`/v1/catalogs/${encodeURIComponent(catalog)}/namespaces`, token);
+  if (!res.ok) throw await asError(res);
+  const body = (await res.json()) as NamespacesResponse;
+  return body.namespaces ?? [];
+}
+
+export async function listTables(token: string, catalog: string, namespace: string): Promise<CatalogTable[]> {
+  const res = await apiFetch(
+    `/v1/catalogs/${encodeURIComponent(catalog)}/namespaces/${encodeURIComponent(namespace)}/tables`,
+    token,
+  );
+  if (!res.ok) throw await asError(res);
+  const body = (await res.json()) as TablesResponse;
+  return body.tables ?? [];
+}
+
+export async function getTable(
+  token: string,
+  catalog: string,
+  namespace: string,
+  table: string,
+): Promise<TableDetail> {
+  const res = await apiFetch(
+    `/v1/catalogs/${encodeURIComponent(catalog)}/namespaces/${encodeURIComponent(namespace)}/tables/${encodeURIComponent(table)}`,
+    token,
+  );
+  if (!res.ok) throw await asError(res);
+  return (await res.json()) as TableDetail;
+}
+
+// getTableSample fetches top-N rows via Trino. The caller is expected to handle
+// a thrown ApiClientError with status 501 (Trino unconfigured) as a graceful
+// "sample unavailable" state.
+export async function getTableSample(
+  token: string,
+  catalog: string,
+  namespace: string,
+  table: string,
+  limit: number,
+): Promise<TableSample> {
+  const res = await apiFetch(
+    `/v1/catalogs/${encodeURIComponent(catalog)}/namespaces/${encodeURIComponent(namespace)}/tables/${encodeURIComponent(table)}/sample?limit=${encodeURIComponent(String(limit))}`,
+    token,
+  );
+  if (!res.ok) throw await asError(res);
+  return (await res.json()) as TableSample;
 }

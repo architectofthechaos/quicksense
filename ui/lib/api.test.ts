@@ -12,6 +12,11 @@ import {
   clusterMetrics,
   getCluster,
   deleteCluster,
+  listCatalogs,
+  listNamespaces,
+  listTables,
+  getTable,
+  getTableSample,
   ApiClientError,
 } from "@/lib/api";
 import type { ClusterConfig } from "@/lib/types";
@@ -242,5 +247,104 @@ describe("clusterMetrics", () => {
     const m = await clusterMetrics("TOK", "1");
     expect(m.available).toBe(false);
     expect(m.pods).toBeUndefined();
+  });
+});
+
+// ── Catalog (Phase 4c) ───────────────────────────────────────────────────────
+
+describe("listCatalogs", () => {
+  it("unwraps the catalogs envelope", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ catalogs: [{ name: "quicksense", type: "iceberg-rest" }] }), { status: 200 }),
+    );
+    const out = await listCatalogs("TOK");
+    expect(out).toEqual([{ name: "quicksense", type: "iceberg-rest" }]);
+    expect(spy.mock.calls[0][0]).toBe("http://api.test/v1/catalogs");
+  });
+  it("tolerates a missing catalogs array", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    await expect(listCatalogs("TOK")).resolves.toEqual([]);
+  });
+  it("throws ApiClientError on an error envelope", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "upstream_error", message: "polaris down" } }), { status: 502 }),
+    );
+    await expect(listCatalogs("TOK")).rejects.toMatchObject({ status: 502, code: "upstream_error" });
+  });
+});
+
+describe("listNamespaces", () => {
+  it("unwraps the namespaces envelope and encodes the catalog", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ namespaces: [{ name: "demo" }, { name: "analytics.sales" }] }), { status: 200 }),
+    );
+    const out = await listNamespaces("TOK", "quick sense");
+    expect(out).toHaveLength(2);
+    expect(out[1].name).toBe("analytics.sales");
+    expect(spy.mock.calls[0][0]).toBe("http://api.test/v1/catalogs/quick%20sense/namespaces");
+  });
+  it("tolerates a missing namespaces array", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    await expect(listNamespaces("TOK", "quicksense")).resolves.toEqual([]);
+  });
+});
+
+describe("listTables", () => {
+  it("unwraps the tables envelope and encodes catalog + namespace", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ tables: [{ name: "events", namespace: "demo" }] }), { status: 200 }),
+    );
+    const out = await listTables("TOK", "quicksense", "demo");
+    expect(out).toEqual([{ name: "events", namespace: "demo" }]);
+    expect(spy.mock.calls[0][0]).toBe("http://api.test/v1/catalogs/quicksense/namespaces/demo/tables");
+  });
+  it("tolerates a missing tables array", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    await expect(listTables("TOK", "quicksense", "demo")).resolves.toEqual([]);
+  });
+});
+
+describe("getTable", () => {
+  it("returns the table-detail payload", async () => {
+    const detail = {
+      location: "s3://bucket/demo/events",
+      format: "iceberg/parquet",
+      current_snapshot_id: "123",
+      columns: [{ name: "id", type: "long", required: true, doc: "primary key" }],
+      partition_fields: ["day"],
+      properties: { "write.format.default": "parquet" },
+      snapshots: [{ snapshot_id: "123", timestamp_ms: 1700000000000, operation: "append" }],
+    };
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify(detail), { status: 200 }));
+    const out = await getTable("TOK", "quicksense", "demo", "events");
+    expect(out).toEqual(detail);
+    expect(spy.mock.calls[0][0]).toBe("http://api.test/v1/catalogs/quicksense/namespaces/demo/tables/events");
+  });
+  it("propagates a 404 for an unknown table", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "not_found", message: "no such table" } }), { status: 404 }),
+    );
+    await expect(getTable("TOK", "quicksense", "demo", "missing")).rejects.toMatchObject({ status: 404, code: "not_found" });
+  });
+});
+
+describe("getTableSample", () => {
+  it("returns columns + rows and appends the limit query", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ columns: ["id", "name"], rows: [[1, "a"], [2, "b"]] }), { status: 200 }),
+    );
+    const out = await getTableSample("TOK", "quicksense", "demo", "events", 50);
+    expect(out.columns).toEqual(["id", "name"]);
+    expect(out.rows).toHaveLength(2);
+    expect(spy.mock.calls[0][0]).toBe("http://api.test/v1/catalogs/quicksense/namespaces/demo/tables/events/sample?limit=50");
+  });
+  it("throws ApiClientError carrying 501 when Trino is unconfigured", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "not_implemented", message: "trino not configured" } }), { status: 501 }),
+    );
+    await expect(getTableSample("TOK", "quicksense", "demo", "events", 50)).rejects.toMatchObject({
+      status: 501,
+      code: "not_implemented",
+    });
   });
 });

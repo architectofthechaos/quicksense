@@ -56,6 +56,44 @@ export type ClusterEventsResponse = { events: ClusterEvent[] };
 export type PodMetrics = { name: string; cpu: string; memory: string };
 export type ClusterMetrics = { available: boolean; pods?: PodMetrics[] };
 
+// ── Catalog (Phase 4c) ───────────────────────────────────────────────────────
+// Iceberg/Polaris browse + table-detail shapes. All reads go through the Go API
+// (the browser never touches Polaris/Trino directly).
+
+// A catalog as returned by GET /v1/catalogs.
+export type Catalog = { name: string; type: string };
+export type CatalogsResponse = { catalogs: Catalog[] };
+
+// A namespace within a catalog. `name` may be dot-joined for nested namespaces
+// (e.g. "demo" or "analytics.sales").
+export type CatalogNamespace = { name: string };
+export type NamespacesResponse = { namespaces: CatalogNamespace[] };
+
+// A table within a namespace. `namespace` echoes the (dot-joined) parent.
+export type CatalogTable = { name: string; namespace: string };
+export type TablesResponse = { tables: CatalogTable[] };
+
+// One column of an Iceberg table schema.
+export type TableColumn = { name: string; type: string; required: boolean; doc?: string };
+
+// One snapshot in an Iceberg table's history.
+export type TableSnapshot = { snapshot_id: string; timestamp_ms: number; operation: string };
+
+// Full table detail from GET /v1/catalogs/{c}/namespaces/{ns}/tables/{t}.
+export type TableDetail = {
+  location: string;
+  format: string;
+  current_snapshot_id: string;
+  columns: TableColumn[];
+  partition_fields: string[];
+  properties: Record<string, string>;
+  snapshots: TableSnapshot[];
+};
+
+// Sample rows from GET …/tables/{t}/sample (via Trino). May be unavailable
+// (HTTP 501) when Trino is unconfigured — the UI handles that gracefully.
+export type TableSample = { columns: string[]; rows: unknown[][] };
+
 export type ApiError = { error: { code: string; message: string } };
 
 export type BadgeKind = "ready" | "running" | "pending" | "failed" | "unknown";
