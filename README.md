@@ -70,14 +70,24 @@ Kubernetes Service) with the following routes:
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/healthz` | No | Liveness probe |
-| GET | `/v1/catalogs` | Yes | List Polaris catalogs |
-| POST | `/v1/catalogs` | Yes | Create a Polaris catalog |
-| GET | `/v1/catalogs/{c}/namespaces/{ns}/tables` | Yes | List Iceberg tables |
-| POST | `/v1/catalogs/{c}/namespaces/{ns}/tables` | Yes | Create an Iceberg table |
-| POST | `/v1/clusters` | Yes | Create a SparkConnect cluster |
-| GET | `/v1/clusters` | Yes | List SparkConnect clusters |
-| GET | `/v1/clusters/{id}` | Yes | Get a SparkConnect cluster |
-| DELETE | `/v1/clusters/{id}` | Yes | Delete a SparkConnect cluster |
+| GET/POST | `/v1/catalogs` | Yes | List / create Polaris catalogs |
+| GET | `/v1/catalogs/{c}/namespaces` | Yes | List namespaces (4c) |
+| GET/POST | `/v1/catalogs/{c}/namespaces/{ns}/tables` | Yes | List / create Iceberg tables |
+| GET | `/v1/catalogs/{c}/namespaces/{ns}/tables/{t}` | Yes | Table detail: columns/details/history (4c) |
+| GET | `/v1/catalogs/{c}/namespaces/{ns}/tables/{t}/sample` | Yes | Sample rows via Trino (4c) |
+| GET/POST | `/v1/clusters` | Yes | List / create SparkConnect clusters (full pod resources, 4b) |
+| GET/PATCH/DELETE | `/v1/clusters/{id}` | Yes | Get / edit-or-pin / delete a cluster |
+| POST | `/v1/clusters/{id}/start\|stop\|restart\|clone` | Yes | Lifecycle (4b) |
+| GET | `/v1/clusters/{id}/events\|logs\|metrics` | Yes | Detail tabs (4b; logs=tail text, metrics best-effort) |
+| GET/PUT/DELETE | `/v1/clusters/{id}/permissions` | Yes | Object-level grants (4e) |
+| GET/POST | `/v1/notebooks` | Yes | List tree / create notebook (4d) |
+| GET/PUT/DELETE | `/v1/notebooks/{id}` | Yes | Get / save cells / trash (4d) |
+| POST | `/v1/notebooks/{id}/attach` | Yes | Attach to an interactive cluster (4d) |
+| GET/POST | `/v1/notebooks/{id}/revisions` | Yes | Version history (save/list) (4d) |
+| POST | `/v1/notebooks/{id}/revisions/{rev}/restore` | Yes | Restore a revision (4d) |
+| GET | `/v1/notebooks/{id}/export?format=ipynb\|py` | Yes | Export (4d) |
+| POST | `/v1/notebooks/{id}/run` | Yes | Cell execution (4d-1; 501 until the Spark Connect broker is wired) |
+| GET/PUT/DELETE | `/v1/notebooks/{id}/permissions` | Yes | Object-level grants (4e) |
 
 All `/v1/*` routes require a valid Keycloak JWT (offline JWKS validation, RS256)
 carrying the `polaris_admin` realm role in `Authorization: Bearer <token>`.
@@ -87,7 +97,8 @@ and manages compute lifecycle by creating/deleting `SparkConnect` custom resourc
 via the Kubernetes API. It does not run Spark or touch table data directly.
 
 The API maintains its own Postgres database (`QUICKSENSE`, distinct from Polaris's
-`POLARIS`) with `workspaces` and `clusters` tables, applied via golang-migrate on
+`POLARIS`) with `workspaces`, `clusters`, `folders`, `notebooks`,
+`notebook_revisions`, and `permissions` tables, applied via golang-migrate on
 startup.
 
 ### Spark Operator
