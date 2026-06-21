@@ -2,6 +2,7 @@
   "realm": "quicksense",
   "enabled": true,
   "displayName": "QuickSense",
+  "loginTheme": "quicksense",
   "displayNameHtml": "<div style=\"font-family:Inter,system-ui,sans-serif;font-size:26px;font-weight:700;letter-spacing:-0.02em;color:#15131F\">Quick<span style=\"color:#5A48E0\">Sense</span></div>",
   "sslRequired": "NONE",
   "roles": {

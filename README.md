@@ -219,3 +219,20 @@ The Spark image downloads pinned Iceberg jars from Maven Central:
 - `org.apache.iceberg:iceberg-aws-bundle:1.10.0`
 
 The Trino helper image installs the pinned Python client `trino==0.337.0` at image build time.
+
+## Branded login (themed Keycloak)
+
+The login page is QuickSense-branded via a Keycloak **login theme** — not a fork or
+custom build. Keycloak runs the **stock image** (`quay.io/keycloak/keycloak`) with the
+theme **mounted** in:
+
+- `docker/keycloak/themes/quicksense/` — `theme.properties` (inherits `parent=keycloak`,
+  so MFA / forgot-password / registration flows stay intact), `login/resources/css/login.css`
+  (indigo palette, centered card), and `login/resources/img/logo.svg` (the Q-pulse mark).
+  All assets are self-hosted — no CDN (air-gapped).
+- The realm (`realm-quicksense.json`) selects it with `"loginTheme": "quicksense"`.
+- **Compose** bind-mounts the theme at `/opt/keycloak/themes/quicksense`; **kind** mounts it
+  from the `keycloak-theme` ConfigMap (created by `scripts/k8s/kind-up.sh`). Same theme, both
+  runtimes.
+
+Auth is unchanged from Sprint 3 (Authorization Code + PKCE); only the page styling differs.

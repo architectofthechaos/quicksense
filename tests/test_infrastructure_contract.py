@@ -2,6 +2,7 @@
 """Static contract tests for SPEC-001 infrastructure deliverables."""
 
 from pathlib import Path
+import json
 import re
 import yaml
 
@@ -639,3 +640,81 @@ def test_readme_documents_phase_b():
         "/v1/clusters",
     ]:
         assert needle in readme, f"Missing '{needle}' in README.md"
+
+
+# ---------------------------------------------------------------------------
+# SPEC-004a: QuickSense-branded Keycloak login theme + punch-list
+# ---------------------------------------------------------------------------
+
+THEME_DIR = "docker/keycloak/themes/quicksense"
+
+
+def test_quicksense_login_theme_files_exist():
+    for path in [
+        f"{THEME_DIR}/login/theme.properties",
+        f"{THEME_DIR}/login/resources/css/login.css",
+        f"{THEME_DIR}/login/resources/img/logo.svg",
+    ]:
+        assert (ROOT / path).is_file(), f"missing theme file {path}"
+
+
+def test_theme_properties_inherit_keycloak_base():
+    path = f"{THEME_DIR}/login/theme.properties"
+    assert (ROOT / path).is_file(), f"missing {path}"
+    props = read(path)
+    # Inherit the stock keycloak base theme (templates, messages, MFA/forgot-password flows).
+    assert re.search(r"(?m)^parent=keycloak\b", props), "theme must inherit parent=keycloak"
+    assert "login.css" in props, "theme must register login.css"
+
+
+def test_realm_uses_quicksense_login_theme():
+    data = json.loads(read("docker/keycloak/realm-quicksense.json"))
+    assert data.get("loginTheme") == "quicksense", "realm loginTheme must be 'quicksense'"
+
+
+def test_login_theme_is_airgapped_indigo():
+    path = f"{THEME_DIR}/login/resources/css/login.css"
+    assert (ROOT / path).is_file(), f"missing {path}"
+    css = read(path).lower()
+    assert "5a48e0" in css, "login.css must use the QuickSense indigo primary (#5A48E0)"
+    # Air-gapped: no runtime CDN fetches of any kind.
+    assert "http://" not in css and "https://" not in css, "login.css must not reference any CDN URL"
+
+
+def test_logo_svg_is_quicksense_mark():
+    path = f"{THEME_DIR}/login/resources/img/logo.svg"
+    assert (ROOT / path).is_file(), f"missing {path}"
+    svg = read(path)
+    assert "<svg" in svg
+    assert "5a48e0" in svg.lower(), "logo must carry the QuickSense indigo gradient"
+
+
+def test_compose_mounts_keycloak_theme():
+    compose = yaml.safe_load(read("docker/docker-compose.yml"))
+    vols = compose["services"]["keycloak"]["volumes"]
+    assert any(
+        "themes/quicksense" in v and "/opt/keycloak/themes/quicksense" in v for v in vols
+    ), f"keycloak service must bind-mount the theme; got {vols}"
+
+
+def test_kind_keycloak_mounts_theme():
+    kc = read("deploy/k8s/base/keycloak.yaml")
+    assert "/opt/keycloak/themes/quicksense" in kc, "kind keycloak must mount the theme path"
+    assert "keycloak-theme" in kc, "kind keycloak must reference the keycloak-theme ConfigMap"
+
+
+def test_kind_up_creates_theme_configmap():
+    kind_up = read("scripts/k8s/kind-up.sh")
+    assert "keycloak-theme" in kind_up, "kind-up.sh must create the keycloak-theme ConfigMap"
+    assert "themes/quicksense" in kind_up, "kind-up.sh must source the theme files"
+
+
+def test_next_dev_indicator_disabled():
+    cfg = read("ui/next.config.ts")
+    assert re.search(r"devIndicators:\s*false", cfg), "Next dev indicator ('1 Issue' badge) must be disabled"
+
+
+def test_readme_documents_login_theme():
+    readme = read("README.md")
+    assert "themes/quicksense" in readme, "README must document the login theme location"
+    assert "loginTheme" in readme or "login theme" in readme.lower()

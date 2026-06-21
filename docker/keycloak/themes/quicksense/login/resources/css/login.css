@@ -1,0 +1,188 @@
+/*
+ * QuickSense login theme — overrides the stock Keycloak (classic) login theme
+ * with the QuickSense brand: indigo palette, a single centered card, and the
+ * Q-pulse mark. Mirrors the app's login card (ui/app/login/page.tsx).
+ * Fully self-hosted — no CDN, no remote fonts; air-gapped by design.
+ */
+
+:root {
+  --qs-bg: #f6f6fb;
+  --qs-surface: #ffffff;
+  --qs-border: #e4e3ee;
+  --qs-text: #15131f;
+  --qs-text-muted: #6b6880;
+  --qs-text-faint: #9d9ab0;
+  --qs-primary: #5a48e0;
+  --qs-primary-hover: #4a37c8;
+  --qs-primary-fg: #ffffff;
+  --qs-error: #c0392b;
+  --qs-ring: rgba(90, 72, 224, 0.35);
+  --qs-radius: 16px;
+  --qs-font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+}
+
+html { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: inherit; }
+
+body,
+body.login-pf {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--qs-font);
+  color: var(--qs-text);
+  background:
+    radial-gradient(620px 460px at 50% -8%, rgba(90, 72, 224, 0.16), transparent 70%),
+    var(--qs-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Center the login card */
+.login-pf-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 32px 16px;
+}
+
+/* Header: the Q-pulse mark above the QuickSense wordmark (realm displayNameHtml) */
+#kc-header,
+.login-pf-page-header {
+  width: 100%;
+  max-width: 408px;
+  text-align: center;
+  margin: 0 0 22px;
+}
+#kc-header-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 0;
+  font-size: 24px;
+  line-height: 1;
+  white-space: normal;
+  color: var(--qs-text);
+}
+#kc-header-wrapper::before {
+  content: "";
+  display: block;
+  width: 52px;
+  height: 52px;
+  background: url("../img/logo.svg") center / contain no-repeat;
+}
+
+/* Card */
+.card-pf,
+#kc-content,
+#kc-content-wrapper { width: 100%; }
+.login-pf-page .card-pf {
+  max-width: 408px;
+  margin: 0 auto;
+  padding: 32px;
+  background: var(--qs-surface);
+  border: 1px solid var(--qs-border);
+  border-radius: var(--qs-radius);
+  box-shadow: 0 10px 30px rgba(20, 19, 31, 0.10), 0 2px 8px rgba(20, 19, 31, 0.06);
+}
+
+/* Titles + helper text */
+#kc-page-title {
+  margin: 0 0 6px;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.instruction,
+#kc-info-message,
+.subtitle { color: var(--qs-text-muted); font-size: 14px; }
+
+/* Form fields */
+.form-group { margin-bottom: 16px; }
+label,
+.control-label,
+.pf-c-form__label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--qs-text-muted);
+}
+input[type="text"],
+input[type="password"],
+input[type="email"],
+input[type="number"],
+.form-control,
+.pf-c-form-control {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  font-size: 14px;
+  color: var(--qs-text);
+  background: var(--qs-bg);
+  border: 1px solid var(--qs-border);
+  border-radius: 10px;
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+input:focus,
+.form-control:focus,
+.pf-c-form-control:focus {
+  border-color: var(--qs-primary);
+  box-shadow: 0 0 0 3px var(--qs-ring);
+}
+input::placeholder { color: var(--qs-text-faint); }
+
+/* Primary button */
+.btn-primary,
+#kc-login,
+input[type="submit"].btn-primary,
+.pf-c-button.pf-m-primary {
+  width: 100%;
+  height: 44px;
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--qs-primary-fg);
+  background: var(--qs-primary);
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 120ms ease, transform 80ms ease;
+}
+.btn-primary:hover,
+#kc-login:hover,
+.pf-c-button.pf-m-primary:hover { background: var(--qs-primary-hover); }
+.btn-primary:active,
+#kc-login:active { transform: translateY(1px); }
+
+/* Links (forgot password, register, try-another-way) */
+a,
+#kc-registration a,
+#kc-form-options a,
+.login-pf-page a {
+  color: var(--qs-primary);
+  text-decoration: none;
+}
+a:hover { text-decoration: underline; }
+
+/* Remember-me checkbox row */
+.checkbox label,
+#kc-form-options .checkbox { color: var(--qs-text-muted); font-weight: 400; }
+
+/* Alerts / field errors */
+.alert-error,
+.pf-c-alert.pf-m-danger,
+.kc-feedback-text,
+#input-error { color: var(--qs-error); font-size: 13px; }
+
+/* "Secured by" footer area */
+#kc-info,
+.login-pf-page #kc-info-wrapper {
+  margin-top: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--qs-text-faint);
+}

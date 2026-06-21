@@ -59,6 +59,9 @@ spec:
             - name: keycloak-realm
               mountPath: /opt/keycloak/data/import
               readOnly: true
+            - name: keycloak-theme
+              mountPath: /opt/keycloak/themes/quicksense
+              readOnly: true
           readinessProbe:
             tcpSocket:
               port: 8082
@@ -77,3 +80,13 @@ spec:
         - name: keycloak-realm
           configMap:
             name: keycloak-realm
+        - name: keycloak-theme
+          configMap:
+            name: keycloak-theme
+            items:
+              - key: theme.properties
+                path: login/theme.properties
+              - key: login.css
+                path: login/resources/css/login.css
+              - key: logo.svg
+                path: login/resources/img/logo.svg

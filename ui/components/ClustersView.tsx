@@ -159,7 +159,7 @@ export function ClustersView() {
           </div>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-card">
+        <div className="overflow-x-auto rounded-xl border border-border bg-surface shadow-card">
           <Table>
             <Thead>
               <Tr>
@@ -178,7 +178,7 @@ export function ClustersView() {
                     onClick={() => setSelected(c)}
                     className="cursor-pointer transition-colors hover:bg-muted"
                   >
-                    <Td className="font-medium text-foreground">{c.name}</Td>
+                    <Td className="whitespace-nowrap font-medium text-foreground">{c.name}</Td>
                     <Td>
                       <Badge kind={b.kind}>{b.label}</Badge>
                     </Td>

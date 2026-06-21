@@ -112,6 +112,13 @@ kubectl create configmap keycloak-realm \
   --from-file=realm-quicksense.json=docker/keycloak/realm-quicksense.json \
   --dry-run=client -o yaml | kubectl apply -f -
 
+echo "Applying ConfigMap keycloak-theme..."
+kubectl create configmap keycloak-theme \
+  --from-file=theme.properties=docker/keycloak/themes/quicksense/login/theme.properties \
+  --from-file=login.css=docker/keycloak/themes/quicksense/login/resources/css/login.css \
+  --from-file=logo.svg=docker/keycloak/themes/quicksense/login/resources/img/logo.svg \
+  --dry-run=client -o yaml | kubectl apply -f -
+
 echo "Applying ConfigMap roundtrip-scripts..."
 kubectl create configmap roundtrip-scripts \
   --from-file=spark_write.py=scripts/roundtrip/spark_write.py \

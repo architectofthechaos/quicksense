@@ -185,6 +185,7 @@ services:
       - "${KEYCLOAK_PORT:-8082}:8082"
     volumes:
       - ./keycloak/realm-quicksense.json:/opt/keycloak/data/import/realm-quicksense.json:ro
+      - ./keycloak/themes/quicksense:/opt/keycloak/themes/quicksense:ro
       - keycloak-data:/opt/keycloak/data
     healthcheck:
       test: ["CMD-SHELL", "bash -lc '</dev/tcp/127.0.0.1/8082'"]

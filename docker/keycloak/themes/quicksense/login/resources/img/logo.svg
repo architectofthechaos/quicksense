@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="QuickSense">
+  <defs>
+    <linearGradient id="qpGrad" x1="14" y1="12" x2="52" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5A48E0"/>
+      <stop offset="1" stop-color="#7A6BF5"/>
+    </linearGradient>
+  </defs>
+  <!-- Q ring — open at the lower-right -->
+  <path d="M42.5 50.2 A21 21 0 1 1 51.7 39.2" stroke="url(#qpGrad)" stroke-width="5" stroke-linecap="round" fill="none"/>
+  <!-- tail exiting lower-right -->
+  <path d="M47.5 45.5 L58 56" stroke="url(#qpGrad)" stroke-width="5" stroke-linecap="round"/>
+  <!-- heartbeat pulse across the center -->
+  <path d="M12 32 H22 L26 24 L31 40 L36 27 L40 34 H50" stroke="#8B7CF8" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>
