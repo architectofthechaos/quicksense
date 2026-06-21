@@ -109,7 +109,7 @@ func (s *PgStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 // clusterColumns is the canonical SELECT/RETURNING column list for clusters,
 // in the order scanCluster expects.
 const clusterColumns = `id, workspace_id, name, namespace, cr_name, phase,
-	COALESCE(connect_url, ''), config, pinned, desired_state, last_activity_at,
+	COALESCE(connect_url, ''), config, pinned, desired_state, last_activity_at, owner,
 	created_at, updated_at`
 
 // scanCluster scans one row (in clusterColumns order) into a *Cluster, mapping
@@ -119,7 +119,7 @@ func scanCluster(row pgx.Row) (*Cluster, error) {
 	var wsID pgtype.Text
 	if err := row.Scan(
 		&c.ID, &wsID, &c.Name, &c.Namespace, &c.CRName, &c.Phase,
-		&c.ConnectURL, &c.Config, &c.Pinned, &c.DesiredState, &c.LastActivityAt,
+		&c.ConnectURL, &c.Config, &c.Pinned, &c.DesiredState, &c.LastActivityAt, &c.Owner,
 		&c.CreatedAt, &c.UpdatedAt,
 	); err != nil {
 		return nil, mapPgError(err)
@@ -144,8 +144,8 @@ func jsonbArg(config json.RawMessage) any {
 // When p.WorkspaceID is empty, SQL NULL is bound so Postgres does not reject
 // the empty string as an invalid UUID (error code 22P02).
 func (s *PgStore) CreateCluster(ctx context.Context, p CreateClusterParams) (*Cluster, error) {
-	q := `INSERT INTO clusters (workspace_id, name, namespace, cr_name, config)
-		VALUES ($1, $2, $3, $4, COALESCE($5::jsonb, '{}'::jsonb))
+	q := `INSERT INTO clusters (workspace_id, name, namespace, cr_name, config, owner)
+		VALUES ($1, $2, $3, $4, COALESCE($5::jsonb, '{}'::jsonb), $6)
 		RETURNING ` + clusterColumns
 
 	var workspaceID any
@@ -153,7 +153,7 @@ func (s *PgStore) CreateCluster(ctx context.Context, p CreateClusterParams) (*Cl
 		workspaceID = p.WorkspaceID
 	} // nil → SQL NULL
 
-	return scanCluster(s.pool.QueryRow(ctx, q, workspaceID, p.Name, p.Namespace, p.CRName, jsonbArg(p.Config)))
+	return scanCluster(s.pool.QueryRow(ctx, q, workspaceID, p.Name, p.Namespace, p.CRName, jsonbArg(p.Config), p.Owner))
 }
 
 // GetCluster retrieves a cluster by its UUID string.

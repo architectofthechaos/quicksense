@@ -43,6 +43,7 @@ type Cluster struct {
 	Pinned         bool            // 4b: excluded from idle auto-terminate
 	DesiredState   string          // 4b: "Running" | "Stopped"
 	LastActivityAt time.Time       // 4b: bumped on attach/run/lifecycle; drives idle reconcile
+	Owner          string          // 4e: creating principal ⇒ implicit manage
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
@@ -54,6 +55,7 @@ type CreateClusterParams struct {
 	Namespace   string
 	CRName      string
 	Config      json.RawMessage // full create config, persisted for lifecycle re-rendering
+	Owner       string          // creating principal (4e)
 }
 
 // Notebook is a workspace notebook (source + metadata) stored in Postgres (4d).

@@ -16,6 +16,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 
+	"github.com/deepiq/quicksense/api/internal/auth"
+	"github.com/deepiq/quicksense/api/internal/authz"
 	"github.com/deepiq/quicksense/api/internal/k8s"
 	"github.com/deepiq/quicksense/api/internal/store"
 )
@@ -164,6 +166,7 @@ func (h *clusterHandler) create(w http.ResponseWriter, r *http.Request) {
 		Namespace: h.namespace,
 		CRName:    crName,
 		Config:    configJSON,
+		Owner:     callerName(r),
 	})
 	if err != nil {
 		// TODO: CR was created but DB row failed — compensation/rollback out of scope (B-future).
@@ -187,6 +190,9 @@ func (h *clusterHandler) list(w http.ResponseWriter, r *http.Request) {
 
 	results := make([]clusterResponse, 0, len(clusters))
 	for _, c := range clusters {
+		if !h.authorize(r, &c, "attach") {
+			continue // server-side scoping: only clusters the caller may attach
+		}
 		status, err := h.k8s.Get(r.Context(), c.CRName)
 		if err != nil {
 			if k8serrors.IsNotFound(err) {
@@ -219,6 +225,11 @@ func (h *clusterHandler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !h.authorize(r, cluster, "attach") {
+		forbid(w)
+		return
+	}
+
 	status, err := h.k8s.Get(r.Context(), cluster.CRName)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
@@ -245,6 +256,11 @@ func (h *clusterHandler) delete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		WriteError(w, http.StatusInternalServerError, "store_error", "failed to get cluster")
+		return
+	}
+
+	if !h.authorize(r, cluster, "manage") {
+		forbid(w)
 		return
 	}
 
@@ -326,6 +342,48 @@ func (h *clusterHandler) getClusterOr404(w http.ResponseWriter, r *http.Request,
 	return c
 }
 
+// callerName returns the authenticated principal's username (owner attribution).
+func callerName(r *http.Request) string {
+	if p, ok := auth.PrincipalFromContext(r.Context()); ok {
+		return p.Username
+	}
+	return ""
+}
+
+// authorize enforces object-level permission on a cluster: owner ⇒ manage,
+// quicksense_admin ⇒ manage, otherwise the effective grant level must meet
+// `level` ("attach" or "manage"). Server-side; the UI only reflects it.
+func (h *clusterHandler) authorize(r *http.Request, c *store.Cluster, level string) bool {
+	p, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		return false
+	}
+	perms, _ := h.store.ListPermissions(r.Context(), "cluster", c.ID)
+	grants := make([]authz.Grant, 0, len(perms))
+	for _, g := range perms {
+		grants = append(grants, authz.Grant{
+			ObjectType: g.ObjectType, ObjectID: g.ObjectID,
+			PrincipalType: g.PrincipalType, PrincipalID: g.PrincipalID, Level: g.Level,
+		})
+	}
+	ap := authz.Principal{Username: p.Username, Groups: p.Groups, Admin: containsStr(p.Roles, notebookAdminRole)}
+	return authz.Allows("cluster", c.ID, grants, ap, c.Owner, level)
+}
+
+// getAuthorizedCluster fetches a cluster and enforces `level`, writing 404/403
+// and returning nil on failure.
+func (h *clusterHandler) getAuthorizedCluster(w http.ResponseWriter, r *http.Request, id, level string) *store.Cluster {
+	c := h.getClusterOr404(w, r, id)
+	if c == nil {
+		return nil
+	}
+	if !h.authorize(r, c, level) {
+		forbid(w)
+		return nil
+	}
+	return c
+}
+
 // respondCluster re-reads the row + live status and writes it at the given code.
 func (h *clusterHandler) respondCluster(w http.ResponseWriter, r *http.Request, id string, code int) {
 	c, err := h.store.GetCluster(r.Context(), id)
@@ -340,7 +398,7 @@ func (h *clusterHandler) respondCluster(w http.ResponseWriter, r *http.Request, 
 // start (re)provisions the CR from stored config and marks desired_state Running.
 func (h *clusterHandler) start(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	c := h.getClusterOr404(w, r, id)
+	c := h.getAuthorizedCluster(w, r, id, "manage")
 	if c == nil {
 		return
 	}
@@ -356,7 +414,7 @@ func (h *clusterHandler) start(w http.ResponseWriter, r *http.Request) {
 // stop deletes the CR (keeping the row + config) and marks desired_state Stopped.
 func (h *clusterHandler) stop(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	c := h.getClusterOr404(w, r, id)
+	c := h.getAuthorizedCluster(w, r, id, "manage")
 	if c == nil {
 		return
 	}
@@ -371,7 +429,7 @@ func (h *clusterHandler) stop(w http.ResponseWriter, r *http.Request) {
 // restart deletes then recreates the CR from stored config.
 func (h *clusterHandler) restart(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	c := h.getClusterOr404(w, r, id)
+	c := h.getAuthorizedCluster(w, r, id, "manage")
 	if c == nil {
 		return
 	}
@@ -391,7 +449,7 @@ func (h *clusterHandler) restart(w http.ResponseWriter, r *http.Request) {
 // clone provisions a new cluster (new row + CR) from a source cluster's config.
 func (h *clusterHandler) clone(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	src := h.getClusterOr404(w, r, id)
+	src := h.getAuthorizedCluster(w, r, id, "manage")
 	if src == nil {
 		return
 	}
@@ -421,6 +479,7 @@ func (h *clusterHandler) clone(w http.ResponseWriter, r *http.Request) {
 		Namespace: h.namespace,
 		CRName:    crName,
 		Config:    configJSON,
+		Owner:     callerName(r),
 	})
 	if err != nil {
 		log.Printf("WARN: clone CR %q created but DB insert failed: %v", crName, err)
@@ -434,7 +493,7 @@ func (h *clusterHandler) clone(w http.ResponseWriter, r *http.Request) {
 // the next start/restart). Body: {"pinned": bool, "config": {<createClusterReq>}}.
 func (h *clusterHandler) patch(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	if c := h.getClusterOr404(w, r, id); c == nil {
+	if c := h.getAuthorizedCluster(w, r, id, "manage"); c == nil {
 		return
 	}
 	var body struct {
@@ -464,7 +523,7 @@ func (h *clusterHandler) patch(w http.ResponseWriter, r *http.Request) {
 // events returns Kubernetes events for the cluster's CR + pods.
 func (h *clusterHandler) events(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	c := h.getClusterOr404(w, r, id)
+	c := h.getAuthorizedCluster(w, r, id, "attach")
 	if c == nil {
 		return
 	}
@@ -479,7 +538,7 @@ func (h *clusterHandler) events(w http.ResponseWriter, r *http.Request) {
 // logs returns recent driver-pod logs as text/plain (the UI tails by polling).
 func (h *clusterHandler) logs(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	c := h.getClusterOr404(w, r, id)
+	c := h.getAuthorizedCluster(w, r, id, "attach")
 	if c == nil {
 		return
 	}
@@ -496,7 +555,7 @@ func (h *clusterHandler) logs(w http.ResponseWriter, r *http.Request) {
 // metrics returns best-effort CPU/memory usage (available=false without metrics-server).
 func (h *clusterHandler) metrics(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	c := h.getClusterOr404(w, r, id)
+	c := h.getAuthorizedCluster(w, r, id, "attach")
 	if c == nil {
 		return
 	}

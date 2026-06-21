@@ -27,7 +27,9 @@ import (
 type fakeVerifier struct{}
 
 func (fakeVerifier) Verify(_ context.Context, _ string) (*auth.Principal, error) {
-	return &auth.Principal{Username: "qsuser", Roles: []string{"polaris_admin"}}, nil
+	// Default test principal is an admin so handler tests exercise the happy path;
+	// object-level enforcement is exercised with non-admin principals via muxAs.
+	return &auth.Principal{Username: "qsuser", Roles: []string{"polaris_admin", "quicksense_admin"}}, nil
 }
 
 // fakeVerifierAs returns a chosen principal — for object-level authz tests where
@@ -167,6 +169,7 @@ func (f *fakeStore) CreateCluster(_ context.Context, p store.CreateClusterParams
 		Config:         p.Config,
 		DesiredState:   "Running",
 		LastActivityAt: time.Now(),
+		Owner:          p.Owner,
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 	}

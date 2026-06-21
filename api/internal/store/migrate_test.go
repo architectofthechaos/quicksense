@@ -156,3 +156,17 @@ func TestMigration0004AddsPermissions(t *testing.T) {
 		}
 	}
 }
+
+// TestMigration0005AddsClusterOwner verifies the 4e cluster-ownership migration.
+func TestMigration0005AddsClusterOwner(t *testing.T) {
+	up, err := fs.ReadFile(store.MigrationsFS, "migrations/0005_clusters_owner.up.sql")
+	if err != nil {
+		t.Fatalf("reading 0005 up: %v", err)
+	}
+	if !strings.Contains(string(up), "owner") || !strings.Contains(string(up), "ALTER TABLE clusters") {
+		t.Errorf("0005 up migration must add the owner column to clusters")
+	}
+	if _, err := fs.ReadFile(store.MigrationsFS, "migrations/0005_clusters_owner.down.sql"); err != nil {
+		t.Fatalf("reading 0005 down: %v", err)
+	}
+}
