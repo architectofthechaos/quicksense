@@ -1,113 +1,101 @@
 # SPEC-004 — Decisions & Status Report
 
-- **Date:** 2026-06-20
+- **Started:** 2026-06-20 (autonomous, multi-phase build)
 - **Branch:** `implement-spec-004-tdd`
-- **Mode:** Autonomous (owner unavailable; delegated all design/approval decisions; requested this report)
-- **Method:** TDD throughout; phase-by-phase; each step independently green and committed
+- **Mode:** Autonomous — owner delegated all design/approval decisions; "keep going until everything is finished" with a decisions report.
+- **Method:** TDD throughout; small green increments; every commit builds and passes `go test ./...` + UI Vitest + tsc + lint.
 
 ---
 
-## 1. What shipped this session
+## 1. Overall progress
 
-| Item | State | Evidence |
+```
+SPEC-004  ███████████████░░░░░  ~75%
+4a Login ✅100%  4b Clusters ✅100%  4c Catalog ✅100%  4d Notebooks ◑~60%  4e AuthZ ◑~40%
+```
+
+| Phase | State | Evidence |
 |---|---|---|
-| Program + 5 phase design docs | ✅ Complete | `docs/superpowers/specs/2026-06-20-spec-004*.md` |
-| **Phase 4a** — branded Keycloak login + punch-list | ✅ **Complete & verified live** | commit `b52a3a6`; pytest 45 |
-| **Phase 4b** — production clusters (backend core) | 🟡 **Backend started** (CR builder + create wiring) | commit `7d6b5a2` |
-| Phases 4c / 4d / 4e | 📐 **Designed** (implementation-ready specs) | per-phase design docs |
-| Pre-existing e2e/bootstrap WIP | ✅ Preserved + committed | commit `a631c86` |
-
-Baseline at start was green and remains green: **Go `go test ./...` ✓, pytest 45 ✓, UI Vitest 51 ✓, tsc + lint clean.**
+| Program + 5 phase design docs | ✅ Complete | `2026-06-20-spec-004*.md` |
+| **4a** Branded Keycloak login + punch-list | ✅ **Complete, verified live** | `b52a3a6` |
+| **4b** Production clusters (backend + UI) | ✅ **Complete** | `7d6b5a2` `7e921ae` `61bf59f` `27b7a70` |
+| **4c** Catalog browser (backend + UI) | ✅ **Complete** (read-first) | `281ba04` `c67a547` `5e9de68` |
+| **4d** Notebooks | ◑ **Backend done; UI in progress; execution deferred** | `0f4691f` `8c241a4` `497d468` `7ff995e` |
+| **4e** AuthN/AuthZ | ◑ **Authz model + permission store/API done; enforcement+identity+UI pending** | `4a5612e` `d5597cb` |
 
 ---
 
 ## 2. Working agreement
-
-You said you would be unavailable to approve plans and to "make decisions yourself and start implementing," with a decisions report at the end. So: no approval gates; I adopted my own recommendations as decisions (below), implemented under TDD, committed each green increment, and wrote this report. Recorded to memory as `spec-004-autonomous-implementation` so a future session resumes correctly.
+Owner is unavailable and delegated all decisions, asking me to implement autonomously with TDD and report. No approval gates; I adopted my own recommendations as decisions, parallelized UI builds via subagents (each verified green before integration), and committed each increment. Recorded to memory as `spec-004-autonomous-implementation`.
 
 ---
 
-## 3. Git state
+## 3. Decisions taken
+Program-level **D1–D11** are in `2026-06-20-spec-004-program-design.md` (full-width enterprise console evolving the indigo tokens; SSE→**polling** chosen for logs; Python Spark-Connect broker for notebook exec; brokered per-user tokens; CodeMirror; read-first catalog; 4d split).
 
+Implementation-level decisions made while building:
+- **4a:** system-font login theme (logo+indigo carry the brand; air-gapped), CSS-only Keycloak override (no FTL fork), realm `loginTheme`. Punch-list: `devIndicators:false`, NAME-column nowrap, Connected pill verified.
+- **4b:** tags→`quicksense.io/*` annotations (not labels); autoscaling via Spark dynamic allocation (user sparkConf wins); full create config persisted as one `config` JSONB so Start/Restart re-render the exact CR; **driver logs as tail-N text + UI polling** (server WriteTimeout 60s makes SSE-follow awkward); metrics best-effort stub.
+- **4c:** Polaris catalog → Trino catalog mapping for sample; nested Iceberg field types resolved; BFF catch-all GET proxy for catalog reads.
+- **4d:** full create config + notebook content stored as JSONB; export = Jupytext `# %%` (.py) + nbformat v4 (.ipynb); `/run` returns 501 until the broker exists.
+- **4e:** per-object-type level ladders; effective = max(admin, owner, direct, group); permission store upsert; level validated against the ladder.
+
+---
+
+## 4. Git state (this build)
 ```
-7d6b5a2 feat(4b): production pod resources on cluster create (TDD)
-b52a3a6 feat(4a): QuickSense-branded Keycloak login theme + punch-list (TDD)
+7ff995e feat(4d): notebook /run endpoint stub (501 until Spark Connect broker)
+5e9de68 feat(4c): catalog browser UI — tree + tabbed table detail
+d5597cb feat(4e): permission store + grant/revoke/list endpoints
+4a5612e feat(4e): object-level authorization model + permission matrix
+497d468 feat(4d): notebook CRUD + revisions + export endpoints
+8c241a4 feat(4d): notebook store — CRUD + revisions
+27b7a70 feat(4b): production clusters UI — full-width console, lifecycle, tabbed detail
+61bf59f feat(4b): cluster events + driver logs + metrics + idle auto-terminate
+7e921ae feat(4b): cluster config persistence + lifecycle start/stop/restart/clone/pin
+0f4691f feat(4d): notebooks storage migration 0003
+c67a547 feat(4c): Trino sample-data client + endpoint
+281ba04 feat(4c): catalog namespaces + Iceberg table metadata via Polaris
+7d6b5a2 feat(4b): production pod resources on cluster create
+b52a3a6 feat(4a): QuickSense-branded Keycloak login theme + punch-list
 c4ecb40 docs(spec-004): program + 4a-4e phase design docs
 a631c86 fix(e2e): Polaris bind idempotency + Keycloak issuer Host header + status polling
-c94b7df  ← origin/main (SPEC-003 UI; main fast-forwarded here)
 ```
-
-- The SPEC-003 UI was already on `origin/main`; local `main` was stale and was fast-forwarded. SPEC-004 branches from there.
-- The 3 uncommitted working-tree files found at start were **pre-existing, tested e2e hardening** (not mine); preserved transparently in `a631c86` rather than discarded.
-
----
-
-## 4. Decisions taken
-
-### Program-level (locked; full rationale in `2026-06-20-spec-004-program-design.md`)
-- **D1 Base:** branch from `origin/main` (UI already there); fast-forward local `main`.
-- **D2/D3 UI:** *evolve* the indigo token system into a **full-width enterprise console** (widen the `max-w-5xl` shell, add a real component library, invest in empty/loading/error state craft) — not a rebrand.
-- **D4 Streaming:** **SSE** for driver logs (4b) and notebook output (4d).
-- **D5 Notebook execution:** **Python Spark-Connect broker** using `pyspark[connect]` (already in the Spark image); Go API brokers sessions. *(Biggest architectural bet — see Risks.)*
-- **D6 Editor:** **CodeMirror 6** (npm-bundled; Monaco's CDN loader breaks air-gapped).
-- **D7 Per-user identity:** **brokered per-user Keycloak tokens** (RFC 8693 exchange deferred).
-- **D8 AuthZ:** server-side `authorize()` gate + Postgres `permissions` table.
-- **D9 Identity store:** users/groups stay in Keycloak (Admin API); the API stores only grants.
-- **D10 Catalog:** read-first; writes only if time.
-- **D11 Notebooks:** split 4d-1 (editor+exec) / 4d-2 (persistence+versions+share).
-
-### Implementation-level (made while building)
-- **4a theme — system font stack (Inter-first), not a bundled webfont (v1).** Keeps the theme text-only → trivially mountable in both runtimes and bulletproof air-gapped; brand identity carried by the Q-pulse SVG logo + indigo palette + card styling. Bundling Inter woff2 is a documented future refinement.
-- **4a theme — CSS-only override** (no `login.ftl` fork): relies on `parent=keycloak` + the realm's existing `displayNameHtml` wordmark, and restyles via the classic theme's stable selectors. Verified these selectors match Keycloak 26.3's rendered DOM.
-- **4a punch-list:** "1 Issue" badge = the Next.js dev indicator → `devIndicators: false`. The "Connected" pill already existed (`ConnectionStatus`) → verified, not rebuilt. NAME-column clip → `overflow-x-auto` + `whitespace-nowrap` (the clusters table is fully redesigned in 4b, which supersedes this).
-- **4b — tags rendered as `quicksense.io/<k>` annotations**, not labels (labels reject arbitrary values).
-- **4b — autoscaling via Spark dynamic allocation** (`spark.dynamicAllocation.*`) seeded from worker min/max; **user sparkConf always wins** (`setIfAbsent`).
-- **4b — env vars emitted in sorted order** for deterministic, diff-stable CRs.
-- **4b — create wires resources → CR now; full config persistence (migration 0002) comes with the lifecycle work** (start/stop must re-render the CR from stored config).
 
 ---
 
 ## 5. Status by phase
 
-### 4a — Branded login ✅ COMPLETE & VERIFIED
-- Theme `docker/keycloak/themes/quicksense/` (theme.properties, indigo `login.css`, Q-pulse `logo.svg`); realm `loginTheme: "quicksense"`; mounted in Compose (bind) + kind (`keycloak-theme` ConfigMap via `kind-up.sh` + items volume in `keycloak.yaml`); air-gapped (no CDN). Punch-list done.
-- **Verified live** on a throwaway stock Keycloak 26.3: theme active (resource path `/login/quicksense`), served `login.css` is ours (indigo, logo ref, no CDN), `logo.svg` 200, CSS selectors match the rendered DOM, `username`/`password`/`kc-login` intact (flow preserved).
-- 10 new infra-contract assertions added (theme files, realm, mounts, ConfigMap, air-gapped, devIndicators, README).
+**4a ✅** Theme served by stock Keycloak 26.3 (verified live: active theme path `/login/quicksense`, our CSS/logo served, air-gapped, login form intact). Punch-list done.
 
-### 4b — Production clusters 🟡 BACKEND STARTED
-- **Done:** `ClusterSpec`/`Resources` + `buildCR` render driver/executor CPU+mem requests/limits, autoscaling, env, tags; create handler accepts the full K8s-native body and maps it through. Backward compatible. TDD-covered.
-- **Remaining (in priority order):** migration 0002 (persist config/pinned/idle/desired_state); lifecycle endpoints `start|stop|restart|clone` + `PATCH`; `events`, `logs?container=driver` (SSE), `metrics`; a typed corev1 client for pods/events/logs; idle auto-terminate reconcile loop; and the enterprise clusters UI (DataTable, ResourceForm, KeyValueEditor, tabbed detail, LogViewer). Full plan: `2026-06-20-spec-004b-clusters-design.md`.
+**4b ✅** Backend: full K8s-native create (resources, autoscaling, env, tags), lifecycle (start/stop/restart/clone/pin), config persistence, events, driver logs (tail text), metrics (best-effort), idle auto-terminate reconciler. UI: full-width console, data table with row actions, rich create form (ResourceFields + KeyValueEditors), tabbed detail (Overview/Events/Logs/Metrics/Permissions). DoD met except live SSE-follow logs (polling instead) and metrics-server (stub).
 
-### 4c — Catalog browser 📐 DESIGNED
-Polaris `ListNamespaces`/`LoadTable` + a new Trino client for sample data; endpoints for namespaces/table-detail/sample; UI tree + detail tabs. Read-first. See `2026-06-20-spec-004c-catalog-design.md`.
+**4c ✅** Backend: Polaris ListNamespaces + LoadTable (columns/details/history), Trino sample client + endpoint. UI: two-pane tree + tabbed detail (Columns/Sample/Details/History/Permissions). Read-first (create-namespace/table intentionally deferred per D10).
 
-### 4d — Notebooks 📐 DESIGNED
-Postgres storage (migration 0003), Python Spark-Connect broker, SSE execution relay, CodeMirror cell editor, versions/share/export. Split 4d-1/4d-2. See `2026-06-20-spec-004d-notebooks-design.md`.
+**4d ◑** Backend done: notebook store (CRUD, attach, soft-trash), revisions (save/list/restore), export (.ipynb/.py). UI: **in progress** (file tree + cell editor + versions/share/export, run wired to the 501 stub). **Execution (4d-1) deferred** — the Python Spark-Connect broker is the flagged spike; `/run` returns 501. So the marquee "run a cell on the Iceberg table" is not yet live.
 
-### 4e — AuthZ 📐 DESIGNED
-`permissions` table (migration 0004) + server-side `authorize()` gate; brokered per-user identity to Polaris/Trino; Users & Groups via Keycloak Admin API; functional Permissions tabs. See `2026-06-20-spec-004e-authz-design.md`.
+**4e ◑** Done: the authorization model (`authz` package, 12-case permission matrix) and the permission store + grant/revoke/list endpoints (Permissions tabs are backed). **Pending:** wiring `authz.Allows` enforcement into every handler (+ surfacing groups/admin from the JWT), per-user identity to Polaris/Trino, the Keycloak Admin API users/groups screen, and the Permissions/Identity UI.
 
 ---
 
-## 6. Verification performed
-- **Go:** `go test ./...` green (added: CR-builder production-resources test, create→spec mapping test).
-- **Infra contract (pytest):** 45 passed (35 prior + 10 new for 4a).
-- **UI (Vitest):** 51 passed; **tsc** clean; **eslint** clean.
-- **Live runtime (4a):** stock Keycloak 26.3 brought up in isolation on :18082, theme confirmed applied + served + air-gapped + flow intact, then torn down (no residue).
+## 6. Verification
+- **Go:** `go test ./...` green across auth, authz, config, http, k8s, polaris, store, trino. Integration (`-tags=integration`) green — migrations 0001→0004 apply against real Postgres.
+- **UI:** Vitest green and growing (51 → 114 after 4b → 159 after 4c); tsc + eslint clean; `next build` succeeds. (Notebooks UI verified by its build agent before integration.)
+- **4a live:** confirmed on a throwaway stock Keycloak.
 
 ---
 
-## 7. How to resume
-
-1. **Finish 4b** — start at migration 0002, then lifecycle endpoints, then the clusters UI. The CR builder + create contract are already in place and tested.
-2. Then **4c → 4d → 4e** in order, each from its design doc, TDD.
-3. Run-everything check before each merge: `cd api && go test ./...` · `python3 -m pytest tests/test_infrastructure_contract.py` · `cd ui && npx vitest run && npx tsc --noEmit && npm run lint`.
-4. The visual "qsuser logs in end-to-end" check for 4a is trivial to eyeball: `task up` (Compose) and open the Keycloak login — wiring is already verified.
+## 7. Remaining work (resume checklist)
+1. **4d notebooks UI** — integrate + commit (in progress).
+2. **4d execution (4d-1)** — stand up the Python `pyspark[connect]` broker; wire `/run` to stream stdout/results/errors; bump cluster `last_activity_at`. **Spike this against a live Spark Connect cluster first.**
+3. **4e enforcement** — add groups/admin to the JWT principal; call `authz.Allows` in cluster/notebook handlers (action gating + list filtering); make the UI Permissions tabs functional.
+4. **4e identity** — per-user token brokering to Polaris/Trino (attribute reads to the real user); Keycloak Admin API + Users & Groups screen.
+5. **Live smoke** — `task kind-up` end-to-end (the kind theme mount, cluster lifecycle, catalog browse, notebook save) — most paths are unit/integration-verified but not yet exercised together on a live cluster this session.
 
 ---
 
-## 8. Risks & open notes
-- **D5 (notebook execution broker)** is the largest unproven piece. Recommend a spike (stand the Python broker against a live Spark Connect cluster and stream one query) before committing to the full 4d UI.
-- **kind theme path** is wiring-verified (ConfigMap + items volume) but not live-run on a kind cluster this session; the Compose path *was* live-verified. A `task kind-up` smoke is the final 5%.
-- **4b lifecycle** depends on persisting cluster config (migration 0002) so Stop→Start can re-render the CR; the create path passes resources to k8s today but does not yet persist them.
-- Pre-existing gofmt nits exist in several files I did **not** touch; left alone to avoid scope creep.
+## 8. Risks & notes
+- **Execution broker (D5)** remains the biggest unproven piece; everything else is tested.
+- Driver logs are **polled tail-text**, not SSE-follow (deliberate, given the 60s server write timeout).
+- Some pre-existing files carry gofmt-version nits I left untouched (scope discipline); all *new* code is gofmt-clean.
+- kind theme mount + full end-to-end on a live cluster is wiring-verified but not live-run this session.
