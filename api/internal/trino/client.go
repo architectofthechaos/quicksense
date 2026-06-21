@@ -12,7 +12,18 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/deepiq/quicksense/api/internal/auth"
 )
+
+// userFor returns the caller's username (per-user attribution, 4e) when present
+// in ctx, else the configured service user.
+func (c *HTTPClient) userFor(ctx context.Context) string {
+	if p, ok := auth.PrincipalFromContext(ctx); ok && p.Username != "" {
+		return p.Username
+	}
+	return c.user
+}
 
 // Result is a sample query result: column names + rows of arbitrary JSON values.
 type Result struct {
@@ -105,7 +116,7 @@ func (c *HTTPClient) post(ctx context.Context, sql string) (*queryResults, error
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("X-Trino-User", c.user)
+	req.Header.Set("X-Trino-User", c.userFor(ctx))
 	req.Header.Set("Content-Type", "text/plain")
 	return c.do(req)
 }
@@ -115,7 +126,7 @@ func (c *HTTPClient) get(ctx context.Context, uri string) (*queryResults, error)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("X-Trino-User", c.user)
+	req.Header.Set("X-Trino-User", c.userFor(ctx))
 	return c.do(req)
 }
 

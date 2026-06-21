@@ -14,6 +14,10 @@ import (
 // principalKey is the unexported context key used to stash a *Principal.
 type principalKey struct{}
 
+// tokenKey is the unexported context key for the caller's raw bearer token, so
+// downstream clients (Polaris) can forward the real user's identity (4e).
+type tokenKey struct{}
+
 // RequireAuth returns a chi-compatible middleware that validates a Bearer token
 // from the Authorization header using the provided TokenVerifier.
 //
@@ -42,6 +46,7 @@ func RequireAuth(v TokenVerifier) func(http.Handler) http.Handler {
 			}
 
 			ctx := context.WithValue(r.Context(), principalKey{}, p)
+			ctx = context.WithValue(ctx, tokenKey{}, raw)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -52,6 +57,24 @@ func RequireAuth(v TokenVerifier) func(http.Handler) http.Handler {
 func PrincipalFromContext(ctx context.Context) (*Principal, bool) {
 	p, ok := ctx.Value(principalKey{}).(*Principal)
 	return p, ok && p != nil
+}
+
+// TokenFromContext retrieves the caller's raw bearer token stashed by RequireAuth,
+// for per-user identity forwarding (4e). Returns ("", false) if absent.
+func TokenFromContext(ctx context.Context) (string, bool) {
+	t, ok := ctx.Value(tokenKey{}).(string)
+	return t, ok && t != ""
+}
+
+// ContextWithPrincipal returns ctx carrying p (used by RequireAuth; exported for
+// tests + internal callers).
+func ContextWithPrincipal(ctx context.Context, p *Principal) context.Context {
+	return context.WithValue(ctx, principalKey{}, p)
+}
+
+// ContextWithToken returns ctx carrying the caller's raw bearer token.
+func ContextWithToken(ctx context.Context, token string) context.Context {
+	return context.WithValue(ctx, tokenKey{}, token)
 }
 
 // bearerToken extracts the token string from an "Authorization: Bearer <t>"

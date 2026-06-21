@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/deepiq/quicksense/api/internal/auth"
 	"github.com/deepiq/quicksense/api/internal/trino"
 )
 
@@ -49,5 +50,27 @@ func TestSampleFollowsNextURI(t *testing.T) {
 	}
 	if res.Rows[1][1] != "b" {
 		t.Errorf("second-page row: %+v", res.Rows[1])
+	}
+}
+
+func TestSampleAttributesCallerUser(t *testing.T) {
+	var gotUser string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUser = r.Header.Get("X-Trino-User")
+		if r.URL.Path == "/v1/statement" {
+			_, _ = w.Write([]byte(`{"columns":[{"name":"id","type":"bigint"}],"data":[[1]]}`))
+			return
+		}
+		http.Error(w, "x", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := trino.NewHTTPClient(srv.URL, "service-user", srv.Client())
+	ctx := auth.ContextWithPrincipal(context.Background(), &auth.Principal{Username: "alice"})
+	if _, err := c.Sample(ctx, "iceberg", "demo", "events", 5); err != nil {
+		t.Fatalf("Sample: %v", err)
+	}
+	if gotUser != "alice" {
+		t.Errorf("X-Trino-User: got %q, want alice (caller, not the service user)", gotUser)
 	}
 }

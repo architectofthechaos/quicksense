@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/deepiq/quicksense/api/internal/auth"
 	"github.com/deepiq/quicksense/api/internal/polaris"
 )
 
@@ -89,5 +90,39 @@ func TestLoadTable(t *testing.T) {
 	}
 	if tm.Properties["owner"] != "qs" {
 		t.Errorf("properties: %+v", tm.Properties)
+	}
+}
+
+func TestForwardsCallerTokenPerUser(t *testing.T) {
+	var gotAuth string
+	tokenCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/catalog/v1/oauth/tokens":
+			tokenCalls++
+			_, _ = w.Write([]byte(`{"access_token":"service","expires_in":3600}`))
+		case "/api/management/v1/catalogs":
+			gotAuth = r.Header.Get("Authorization")
+			_, _ = w.Write([]byte(`{"catalogs":[]}`))
+		default:
+			http.Error(w, "unexpected "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	c, err := polaris.NewHTTPClient(srv.URL, "POLARIS", "root", "s3cr3t", srv.Client())
+	if err != nil {
+		t.Fatalf("NewHTTPClient: %v", err)
+	}
+	// A caller token in context ⇒ forward it (per-user), do NOT fetch a service token.
+	ctx := auth.ContextWithToken(context.Background(), "caller-jwt")
+	if _, err := c.ListCatalogs(ctx); err != nil {
+		t.Fatalf("ListCatalogs: %v", err)
+	}
+	if gotAuth != "Bearer caller-jwt" {
+		t.Errorf("Authorization: got %q, want Bearer caller-jwt", gotAuth)
+	}
+	if tokenCalls != 0 {
+		t.Errorf("must not fetch a service token when forwarding the caller token; got %d", tokenCalls)
 	}
 }

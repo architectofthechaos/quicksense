@@ -22,7 +22,21 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/deepiq/quicksense/api/internal/auth"
 )
+
+// bearer returns the caller's forwarded bearer token (per-user identity, 4e)
+// when present in ctx — Polaris external OIDC maps it to that user's principal —
+// else the cached service token (client-credentials).
+func (c *HTTPClient) bearer(ctx context.Context) (string, error) {
+	if tok, ok := auth.TokenFromContext(ctx); ok {
+		return tok, nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.tokenLocked(ctx)
+}
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -243,9 +257,7 @@ func (c *HTTPClient) fetchToken(ctx context.Context) (string, error) {
 // ---------------------------------------------------------------------------
 
 func (c *HTTPClient) doManagement(ctx context.Context, method, path string, reqBody io.Reader) (*http.Response, []byte, error) {
-	c.mu.Lock()
-	tok, err := c.tokenLocked(ctx)
-	c.mu.Unlock()
+	tok, err := c.bearer(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -276,9 +288,7 @@ func (c *HTTPClient) doManagement(ctx context.Context, method, path string, reqB
 
 // doCatalog is like doManagement but for the Iceberg catalog API.
 func (c *HTTPClient) doCatalog(ctx context.Context, method, path string, reqBody io.Reader) (*http.Response, []byte, error) {
-	c.mu.Lock()
-	tok, err := c.tokenLocked(ctx)
-	c.mu.Unlock()
+	tok, err := c.bearer(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
