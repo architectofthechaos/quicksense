@@ -89,6 +89,16 @@ func NewRouter(deps RouterDeps) *chi.Mux {
 		r.Post("/notebooks/{id}/revisions", nh.saveRevision)
 		r.Post("/notebooks/{id}/revisions/{rev}/restore", nh.restoreRevision)
 		r.Get("/notebooks/{id}/export", nh.export)
+
+		// 4e: object-level permissions (Permissions tabs).
+		cph := &permHandler{store: deps.Store, objectType: "cluster"}
+		r.Get("/clusters/{id}/permissions", cph.list)
+		r.Put("/clusters/{id}/permissions", cph.grant)
+		r.Delete("/clusters/{id}/permissions", cph.revoke)
+		nbph := &permHandler{store: deps.Store, objectType: "notebook"}
+		r.Get("/notebooks/{id}/permissions", nbph.list)
+		r.Put("/notebooks/{id}/permissions", nbph.grant)
+		r.Delete("/notebooks/{id}/permissions", nbph.revoke)
 	})
 
 	return r

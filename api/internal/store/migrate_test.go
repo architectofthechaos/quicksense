@@ -128,3 +128,31 @@ func TestMigration0003AddsNotebooks(t *testing.T) {
 		}
 	}
 }
+
+// TestMigration0004AddsPermissions verifies the 4e permissions migration.
+func TestMigration0004AddsPermissions(t *testing.T) {
+	for _, f := range []string{
+		"migrations/0004_permissions.up.sql",
+		"migrations/0004_permissions.down.sql",
+	} {
+		data, err := fs.ReadFile(store.MigrationsFS, f)
+		if err != nil {
+			t.Fatalf("expected embedded file %q: %v", f, err)
+		}
+		if len(data) == 0 {
+			t.Errorf("embedded file %q is empty", f)
+		}
+	}
+	up, err := fs.ReadFile(store.MigrationsFS, "migrations/0004_permissions.up.sql")
+	if err != nil {
+		t.Fatalf("reading 0004 up: %v", err)
+	}
+	if !strings.Contains(string(up), "CREATE TABLE permissions") {
+		t.Errorf("0004 up migration missing permissions table")
+	}
+	for _, col := range []string{"object_type", "object_id", "principal_type", "principal_id", "level"} {
+		if !strings.Contains(string(up), col) {
+			t.Errorf("0004 up migration missing column %q", col)
+		}
+	}
+}

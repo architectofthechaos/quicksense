@@ -351,6 +351,61 @@ func (s *PgStore) GetRevision(ctx context.Context, revID string) (*NotebookRevis
 	return scanRevision(s.pool.QueryRow(ctx, q, revID))
 }
 
+// ---- Permission methods (4e) ----
+
+const permissionColumns = `object_type, object_id, principal_type, principal_id, level, granted_by, created_at`
+
+func scanPermission(row pgx.Row) (*Permission, error) {
+	var p Permission
+	if err := row.Scan(&p.ObjectType, &p.ObjectID, &p.PrincipalType, &p.PrincipalID, &p.Level, &p.GrantedBy, &p.CreatedAt); err != nil {
+		return nil, mapPgError(err)
+	}
+	return &p, nil
+}
+
+// GrantPermission upserts a grant on (object, principal), replacing the level.
+func (s *PgStore) GrantPermission(ctx context.Context, p GrantParams) (*Permission, error) {
+	q := `INSERT INTO permissions (object_type, object_id, principal_type, principal_id, level, granted_by)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (object_type, object_id, principal_type, principal_id)
+		DO UPDATE SET level = EXCLUDED.level, granted_by = EXCLUDED.granted_by
+		RETURNING ` + permissionColumns
+	return scanPermission(s.pool.QueryRow(ctx, q, p.ObjectType, p.ObjectID, p.PrincipalType, p.PrincipalID, p.Level, p.GrantedBy))
+}
+
+// RevokePermission removes a principal's grant on an object (ErrNotFound if absent).
+func (s *PgStore) RevokePermission(ctx context.Context, objectType, objectID, principalType, principalID string) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM permissions WHERE object_type=$1 AND object_id=$2 AND principal_type=$3 AND principal_id=$4`,
+		objectType, objectID, principalType, principalID)
+	if err != nil {
+		return mapPgError(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListPermissions returns all grants on an object.
+func (s *PgStore) ListPermissions(ctx context.Context, objectType, objectID string) ([]Permission, error) {
+	q := `SELECT ` + permissionColumns + ` FROM permissions WHERE object_type=$1 AND object_id=$2 ORDER BY principal_type, principal_id`
+	rows, err := s.pool.Query(ctx, q, objectType, objectID)
+	if err != nil {
+		return nil, mapPgError(err)
+	}
+	defer rows.Close()
+	var result []Permission
+	for rows.Next() {
+		p, err := scanPermission(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, *p)
+	}
+	return result, rows.Err()
+}
+
 // mapPgError translates pgx-level errors to store-level sentinel errors.
 //
 //   - pgx.ErrNoRows → ErrNotFound

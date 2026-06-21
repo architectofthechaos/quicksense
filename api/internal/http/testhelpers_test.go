@@ -106,10 +106,11 @@ func (f *fakeTrino) Sample(_ context.Context, catalog, schema, table string, lim
 
 type fakeStore struct {
 	mu        sync.Mutex
-	clusters  map[string]*store.Cluster
-	notebooks map[string]*store.Notebook
-	revisions map[string]*store.NotebookRevision
-	nextErr   error // if set, the next mutating call returns this error
+	clusters    map[string]*store.Cluster
+	notebooks   map[string]*store.Notebook
+	revisions   map[string]*store.NotebookRevision
+	permissions []store.Permission
+	nextErr     error // if set, the next mutating call returns this error
 }
 
 func newFakeStore() *fakeStore {
@@ -363,6 +364,52 @@ func (f *fakeStore) GetRevision(_ context.Context, revID string) (*store.Noteboo
 	}
 	cp := *r
 	return &cp, nil
+}
+
+func (f *fakeStore) GrantPermission(_ context.Context, p store.GrantParams) (*store.Permission, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.permissions {
+		x := &f.permissions[i]
+		if x.ObjectType == p.ObjectType && x.ObjectID == p.ObjectID && x.PrincipalType == p.PrincipalType && x.PrincipalID == p.PrincipalID {
+			x.Level = p.Level
+			x.GrantedBy = p.GrantedBy
+			cp := *x
+			return &cp, nil
+		}
+	}
+	perm := store.Permission{
+		ObjectType: p.ObjectType, ObjectID: p.ObjectID, PrincipalType: p.PrincipalType,
+		PrincipalID: p.PrincipalID, Level: p.Level, GrantedBy: p.GrantedBy, CreatedAt: time.Now(),
+	}
+	f.permissions = append(f.permissions, perm)
+	cp := perm
+	return &cp, nil
+}
+
+func (f *fakeStore) RevokePermission(_ context.Context, objectType, objectID, principalType, principalID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.permissions {
+		x := f.permissions[i]
+		if x.ObjectType == objectType && x.ObjectID == objectID && x.PrincipalType == principalType && x.PrincipalID == principalID {
+			f.permissions = append(f.permissions[:i], f.permissions[i+1:]...)
+			return nil
+		}
+	}
+	return store.ErrNotFound
+}
+
+func (f *fakeStore) ListPermissions(_ context.Context, objectType, objectID string) ([]store.Permission, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []store.Permission
+	for _, x := range f.permissions {
+		if x.ObjectType == objectType && x.ObjectID == objectID {
+			out = append(out, x)
+		}
+	}
+	return out, nil
 }
 
 // seed adds a cluster directly to the fake store (for test setup).

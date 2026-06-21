@@ -89,6 +89,27 @@ type NotebookRevision struct {
 	CreatedAt  time.Time
 }
 
+// Permission is a stored object-level grant (4e).
+type Permission struct {
+	ObjectType    string
+	ObjectID      string
+	PrincipalType string
+	PrincipalID   string
+	Level         string
+	GrantedBy     string
+	CreatedAt     time.Time
+}
+
+// GrantParams carries a permission grant (upsert on the unique principal+object).
+type GrantParams struct {
+	ObjectType    string
+	ObjectID      string
+	PrincipalType string
+	PrincipalID   string
+	Level         string
+	GrantedBy     string
+}
+
 // ErrNotFound is returned when a requested resource does not exist in the store.
 var ErrNotFound = errors.New("not found")
 
@@ -130,4 +151,9 @@ type Store interface {
 	CreateRevision(ctx context.Context, notebookID string, snapshot json.RawMessage, message, author string) (*NotebookRevision, error)
 	ListRevisions(ctx context.Context, notebookID string) ([]NotebookRevision, error)
 	GetRevision(ctx context.Context, revID string) (*NotebookRevision, error)
+
+	// Permission methods (4e).
+	GrantPermission(ctx context.Context, p GrantParams) (*Permission, error)
+	RevokePermission(ctx context.Context, objectType, objectID, principalType, principalID string) error
+	ListPermissions(ctx context.Context, objectType, objectID string) ([]Permission, error)
 }

@@ -100,3 +100,8 @@ func Allows(objectType, objectID string, grants []Grant, p Principal, owner, req
 	}
 	return rank(objectType, Effective(objectType, objectID, grants, p, owner)) >= want
 }
+
+// ValidLevel reports whether level is a defined level for objectType.
+func ValidLevel(objectType, level string) bool {
+	return rank(objectType, level) >= 0
+}
