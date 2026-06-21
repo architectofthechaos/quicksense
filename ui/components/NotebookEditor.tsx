@@ -18,7 +18,6 @@ import {
   Link2,
   CircleAlert,
   RotateCcw,
-  X,
 } from "lucide-react";
 import type {
   Notebook,
@@ -26,9 +25,6 @@ import type {
   NotebookContent,
   RunOutput,
   Revision,
-  Permission,
-  PermissionLevel,
-  PrincipalType,
   Cluster,
 } from "@/lib/types";
 import { newCell, moveCell, normalizeContent, notebookDisplayName } from "@/lib/types";
@@ -36,11 +32,11 @@ import { notebookExportUrl } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Drawer } from "@/components/ui/Drawer";
-import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Toast";
 import { CodeEditor } from "@/components/CodeEditor";
 import { Markdown } from "@/components/Markdown";
 import { OutputRenderer, type CellRunState } from "@/components/OutputRenderer";
+import { PermissionsEditor } from "@/components/PermissionsEditor";
 
 async function readError(res: Response): Promise<{ message: string; code?: string }> {
   try {
@@ -711,152 +707,23 @@ function RevisionHistory({
 
 // ── Share dialog ─────────────────────────────────────────────────────────────
 
-const LEVELS: PermissionLevel[] = ["view", "run", "edit", "manage"];
+// Notebook permission levels (Phase 4e contract): view < run < edit < manage.
+const NOTEBOOK_LEVELS = ["view", "run", "edit", "manage"];
 
+// ShareDialog is now a thin shell around the reusable PermissionsEditor — the
+// grant/revoke/list mechanics live there and are shared with the cluster
+// permissions tab. We just provide the modal chrome and the notebook level set.
 function ShareDialog({ open, notebookId, onClose }: { open: boolean; notebookId: string; onClose: () => void }) {
-  const [perms, setPerms] = useState<Permission[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [principalType, setPrincipalType] = useState<PrincipalType>("user");
-  const [principalId, setPrincipalId] = useState("");
-  const [level, setLevel] = useState<PermissionLevel>("view");
-
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const res = await fetch(`/api/notebooks/${encodeURIComponent(notebookId)}/permissions`, { cache: "no-store" });
-      if (!res.ok) {
-        setError((await readError(res)).message);
-        return;
-      }
-      setPerms(((await res.json()).permissions ?? []) as Permission[]);
-    } catch {
-      setError("Could not reach the API.");
-    }
-  }, [notebookId]);
-
-  useEffect(() => {
-    if (open) {
-      setPerms(null);
-      setPrincipalId("");
-      void load();
-    }
-  }, [open, load]);
-
-  async function grant() {
-    const pid = principalId.trim();
-    if (!pid) return;
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/notebooks/${encodeURIComponent(notebookId)}/permissions`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ principal_type: principalType, principal_id: pid, level }),
-      });
-      if (!res.ok && res.status !== 204) {
-        setError((await readError(res)).message);
-        return;
-      }
-      setPrincipalId("");
-      await load();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function revoke(p: Permission) {
-    setBusy(true);
-    try {
-      const qs = `principal_type=${encodeURIComponent(p.principal_type)}&principal_id=${encodeURIComponent(p.principal_id)}`;
-      const res = await fetch(`/api/notebooks/${encodeURIComponent(notebookId)}/permissions?${qs}`, { method: "DELETE" });
-      if (!res.ok && res.status !== 204) {
-        setError((await readError(res)).message);
-        return;
-      }
-      await load();
-    } finally {
-      setBusy(false);
-    }
-  }
-
   if (!open) return null;
 
   return (
     <Dialog open={open} onClose={onClose} title="Share notebook">
       <p className="mb-4 mt-1 text-sm text-muted-foreground">
-        Grant a user or group access at a chosen level. Enforcement is server-side (Phase 4e).
+        Grant a user or group access at a chosen level. Enforcement is server-side.
       </p>
 
-      <div className="space-y-2 rounded-lg border border-border bg-surface-2 p-3">
-        <div className="flex flex-wrap gap-2">
-          <select
-            aria-label="Principal type"
-            value={principalType}
-            onChange={(e) => setPrincipalType(e.target.value as PrincipalType)}
-            className="focus-ring rounded-lg border border-border bg-background px-2.5 py-2 text-sm text-foreground"
-          >
-            <option value="user">User</option>
-            <option value="group">Group</option>
-          </select>
-          <input
-            aria-label="Principal id"
-            value={principalId}
-            onChange={(e) => setPrincipalId(e.target.value)}
-            placeholder={principalType === "user" ? "username" : "group name"}
-            className="focus-ring min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-faint"
-          />
-          <select
-            aria-label="Permission level"
-            value={level}
-            onChange={(e) => setLevel(e.target.value as PermissionLevel)}
-            className="focus-ring rounded-lg border border-border bg-background px-2.5 py-2 text-sm capitalize text-foreground"
-          >
-            {LEVELS.map((l) => (
-              <option key={l} value={l}>
-                {l}
-              </option>
-            ))}
-          </select>
-          <Button onClick={() => void grant()} disabled={busy || principalId.trim() === ""}>
-            Grant
-          </Button>
-        </div>
-      </div>
-
-      {error && <p className="mt-3 text-sm text-error">{error}</p>}
-
-      <div className="mt-4 max-h-[40vh] overflow-y-auto">
-        {perms === null ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">Loading permissions…</p>
-        ) : perms.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">No one else has access yet.</p>
-        ) : (
-          <ul className="space-y-1.5">
-            {perms.map((p) => (
-              <li
-                key={`${p.principal_type}:${p.principal_id}`}
-                className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2"
-              >
-                <div className="min-w-0">
-                  <span className="truncate text-sm font-medium text-foreground">{p.principal_id}</span>
-                  <span className="ml-2 text-xs text-muted-foreground">{p.principal_type}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge kind="unknown">{p.level}</Badge>
-                  <button
-                    type="button"
-                    onClick={() => void revoke(p)}
-                    disabled={busy}
-                    aria-label={`Revoke access for ${p.principal_id}`}
-                    className="focus-ring rounded-md p-1 text-muted-foreground transition-colors hover:bg-[color-mix(in_srgb,var(--error)_10%,var(--surface))] hover:text-error disabled:opacity-50"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+      <div className="max-h-[60vh] overflow-y-auto pr-1">
+        <PermissionsEditor kind="notebooks" objectId={notebookId} levels={NOTEBOOK_LEVELS} />
       </div>
 
       <div className="mt-5 flex justify-end">

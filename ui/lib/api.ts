@@ -332,6 +332,57 @@ export async function deleteNotebookPermission(
   if (!res.ok && res.status !== 204) throw await asError(res);
 }
 
+// ── Generic object-level permissions (Phase 4e) ──────────────────────────────
+// One set of fns serves both clusters and notebooks; `kind` selects the path
+// segment ("clusters" | "notebooks"). The Go contract is shared:
+//   GET    /v1/{kind}/{id}/permissions → {object_type, permissions:[…]}
+//   PUT    /v1/{kind}/{id}/permissions  {principal_type,principal_id,level} → grant
+//   DELETE /v1/{kind}/{id}/permissions?principal_type=&principal_id= → 204
+// `token` is last (not first like the older fns) so the call site reads
+// kind-first, matching the component's props; it is still injected server-side.
+
+export type PermissionKind = "clusters" | "notebooks";
+
+// GrantInput is the PUT body. `level` is a free string here because valid values
+// differ per kind (cluster: attach|manage; notebook: view|run|edit|manage); the
+// API is the source of truth and rejects an invalid level with 400.
+export type GrantInput = { principal_type: PrincipalType; principal_id: string; level: string };
+
+const permPath = (kind: PermissionKind, id: string) => `/v1/${kind}/${encodeURIComponent(id)}/permissions`;
+
+export async function listPermissions(kind: PermissionKind, id: string, token: string): Promise<Permission[]> {
+  const res = await apiFetch(permPath(kind, id), token);
+  if (!res.ok) throw await asError(res);
+  const body = (await res.json()) as PermissionsResponse;
+  return body.permissions ?? [];
+}
+
+// grantPermission PUTs a grant. On 200 it returns the parsed grant; a 204
+// (no body) resolves to null. A non-ok/non-204 (e.g. 400 invalid level) throws.
+export async function grantPermission(
+  kind: PermissionKind,
+  id: string,
+  input: GrantInput,
+  token: string,
+): Promise<Permission | null> {
+  const res = await apiFetch(permPath(kind, id), token, { method: "PUT", body: JSON.stringify(input) });
+  if (!res.ok && res.status !== 204) throw await asError(res);
+  if (res.status === 204) return null;
+  return (await res.json()) as Permission;
+}
+
+export async function revokePermission(
+  kind: PermissionKind,
+  id: string,
+  principalType: PrincipalType,
+  principalId: string,
+  token: string,
+): Promise<void> {
+  const qs = `principal_type=${encodeURIComponent(principalType)}&principal_id=${encodeURIComponent(principalId)}`;
+  const res = await apiFetch(`${permPath(kind, id)}?${qs}`, token, { method: "DELETE" });
+  if (!res.ok && res.status !== 204) throw await asError(res);
+}
+
 // notebookExportUrl builds the *browser-facing* BFF export URL (not the upstream
 // path). The export route streams the upstream file + content-disposition; the
 // UI just points a download link at this.

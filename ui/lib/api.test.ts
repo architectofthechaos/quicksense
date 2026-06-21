@@ -30,6 +30,9 @@ import {
   listNotebookPermissions,
   putNotebookPermission,
   deleteNotebookPermission,
+  listPermissions,
+  grantPermission,
+  revokePermission,
   notebookExportUrl,
   notebookExport,
   ApiClientError,
@@ -599,5 +602,97 @@ describe("notebookExport", () => {
       new Response(JSON.stringify({ error: { code: "not_found", message: "gone" } }), { status: 404 }),
     );
     await expect(notebookExport("TOK", "n1", "ipynb")).rejects.toBeInstanceOf(ApiClientError);
+  });
+});
+
+// Generic object-level permissions (Phase 4e). The same three fns serve both
+// clusters and notebooks, switching the path segment on `kind`.
+describe("permissions (generic, kind-keyed)", () => {
+  it("lists cluster permissions, unwrapping the envelope", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ object_type: "cluster", permissions: [{ principal_type: "user", principal_id: "alice", level: "manage" }] }),
+        { status: 200 },
+      ),
+    );
+    const out = await listPermissions("clusters", "c1", "TOK");
+    expect(out).toEqual([{ principal_type: "user", principal_id: "alice", level: "manage" }]);
+  });
+
+  it("lists notebook permissions, unwrapping the envelope", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ permissions: [{ principal_type: "group", principal_id: "data", level: "run" }] }), { status: 200 }),
+    );
+    const out = await listPermissions("notebooks", "n1", "TOK");
+    expect(out).toEqual([{ principal_type: "group", principal_id: "data", level: "run" }]);
+    expect(spy.mock.calls[0][0]).toBe("http://api.test/v1/notebooks/n1/permissions");
+  });
+
+  it("tolerates a missing permissions array", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    await expect(listPermissions("clusters", "c1", "TOK")).resolves.toEqual([]);
+  });
+
+  it("encodes the id in the path", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify({ permissions: [] }), { status: 200 }));
+    await listPermissions("clusters", "a b", "TOK");
+    expect(spy.mock.calls[0][0]).toBe("http://api.test/v1/clusters/a%20b/permissions");
+  });
+
+  it("throws ApiClientError on a non-ok list", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "forbidden", message: "no" } }), { status: 403 }),
+    );
+    await expect(listPermissions("clusters", "c1", "TOK")).rejects.toMatchObject({ status: 403, code: "forbidden" });
+  });
+
+  it("PUTs a cluster grant and returns the parsed grant", async () => {
+    const grant = { principal_type: "user", principal_id: "bob", level: "attach" };
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(new Response(JSON.stringify(grant), { status: 200 }));
+    const out = await grantPermission("clusters", "c1", { principal_type: "user", principal_id: "bob", level: "attach" }, "TOK");
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe("http://api.test/v1/clusters/c1/permissions");
+    expect(init!.method).toBe("PUT");
+    expect(JSON.parse(init!.body as string)).toEqual({ principal_type: "user", principal_id: "bob", level: "attach" });
+    expect(out).toEqual(grant);
+  });
+
+  it("tolerates a 204 (no body) grant", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    await expect(
+      grantPermission("notebooks", "n1", { principal_type: "group", principal_id: "data", level: "edit" }, "TOK"),
+    ).resolves.toBeNull();
+  });
+
+  it("throws ApiClientError on an invalid level (400)", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "invalid_level", message: "bad level" } }), { status: 400 }),
+    );
+    await expect(
+      grantPermission("clusters", "c1", { principal_type: "user", principal_id: "x", level: "bogus" }, "TOK"),
+    ).rejects.toMatchObject({ status: 400, code: "invalid_level" });
+  });
+
+  it("DELETEs a grant with principal query params", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    await revokePermission("clusters", "c1", "group", "data", "TOK");
+    const [url, init] = spy.mock.calls[0];
+    expect(url).toBe("http://api.test/v1/clusters/c1/permissions?principal_type=group&principal_id=data");
+    expect(init!.method).toBe("DELETE");
+  });
+
+  it("encodes principal query params on revoke", async () => {
+    const spy = vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    await revokePermission("notebooks", "n1", "user", "a b@c", "TOK");
+    expect(spy.mock.calls[0][0]).toBe(
+      "http://api.test/v1/notebooks/n1/permissions?principal_type=user&principal_id=a%20b%40c",
+    );
+  });
+
+  it("throws ApiClientError on a non-ok/non-204 revoke", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "forbidden", message: "no" } }), { status: 403 }),
+    );
+    await expect(revokePermission("clusters", "c1", "user", "alice", "TOK")).rejects.toMatchObject({ status: 403 });
   });
 });

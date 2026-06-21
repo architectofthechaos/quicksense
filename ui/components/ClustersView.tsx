@@ -35,6 +35,7 @@ import { useToast } from "@/components/ui/Toast";
 import { KeyValueEditor } from "@/components/KeyValueEditor";
 import { ResourceField } from "@/components/ResourceField";
 import { LogViewer } from "@/components/LogViewer";
+import { PermissionsEditor } from "@/components/PermissionsEditor";
 import { Mark } from "@/components/brand/Logo";
 
 const POLL_MS = 4000;
@@ -592,7 +593,7 @@ function ClusterDetail({ cluster, onConnect }: { cluster: Cluster; onConnect: ()
           { id: "events", label: "Events", content: <EventsTab clusterId={cluster.id} /> },
           { id: "logs", label: "Driver logs", content: <LogViewer clusterId={cluster.id} /> },
           { id: "metrics", label: "Metrics", content: <MetricsTab clusterId={cluster.id} /> },
-          { id: "permissions", label: "Permissions", content: <PermissionsTab /> },
+          { id: "permissions", label: "Permissions", content: <PermissionsTab clusterId={cluster.id} /> },
         ]}
       />
     </div>
@@ -770,13 +771,10 @@ function MetricsTab({ clusterId }: { clusterId: string }) {
   );
 }
 
-function PermissionsTab() {
-  return (
-    <div className="rounded-lg border border-dashed border-border bg-surface p-8 text-center">
-      <p className="mb-1 text-sm font-semibold text-foreground">Permissions</p>
-      <p className="text-sm text-muted-foreground">
-        Object-level access control is managed in Phase 4e. Grants and roles will appear here.
-      </p>
-    </div>
-  );
+// Cluster permission levels (Phase 4e contract): attach lets a principal attach
+// notebooks/sessions; manage additionally administers the cluster + its grants.
+const CLUSTER_LEVELS = ["attach", "manage"];
+
+function PermissionsTab({ clusterId }: { clusterId: string }) {
+  return <PermissionsEditor kind="clusters" objectId={clusterId} levels={CLUSTER_LEVELS} />;
 }
