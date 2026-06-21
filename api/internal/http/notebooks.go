@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/deepiq/quicksense/api/internal/auth"
 	"github.com/deepiq/quicksense/api/internal/store"
 )
 
@@ -91,8 +92,12 @@ func (h *notebookHandler) create(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(path) == "" {
 		path = "/" + req.Name
 	}
+	owner := ""
+	if p, ok := auth.PrincipalFromContext(r.Context()); ok {
+		owner = p.Username
+	}
 	nb, err := h.store.CreateNotebook(r.Context(), store.CreateNotebookParams{
-		Name: req.Name, Path: path, FolderID: req.FolderID, Content: req.Content,
+		Name: req.Name, Path: path, FolderID: req.FolderID, Owner: owner, Content: req.Content,
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrConflict) {

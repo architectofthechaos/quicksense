@@ -76,6 +76,21 @@ func TestNotebookSaveUpdateRestore(t *testing.T) {
 	}
 }
 
+func TestNotebookCreateSetsOwner(t *testing.T) {
+	fs := newFakeStore()
+	mux := notebookMux(fs)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authReq(http.MethodPost, "/v1/notebooks", mustJSON(map[string]any{"name": "owned", "path": "/owned"})))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var nb map[string]any
+	json.Unmarshal(w.Body.Bytes(), &nb)
+	if nb["owner"] != "qsuser" {
+		t.Errorf("owner: got %v, want qsuser (the authenticated principal ⇒ implicit manage)", nb["owner"])
+	}
+}
+
 func TestNotebookAttachCluster(t *testing.T) {
 	fs := newFakeStore()
 	mux := notebookMux(fs)
