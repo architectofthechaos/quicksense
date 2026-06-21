@@ -10,11 +10,11 @@
 ## 1. Overall progress
 
 ```
-SPEC-004  ██████████████████▓░  ~92%
-4a Login ✅100%  4b Clusters ✅100%  4c Catalog ✅100%  4d Notebooks ◑~75%  4e AuthZ ◑~90%
+SPEC-004  ███████████████████░  ~94%
+4a Login ✅100%  4b Clusters ✅100%  4c Catalog ✅100%  4d Notebooks ◑~90%  4e AuthZ ◑~90%
 ```
 
-**Everything unit/integration/build-verifiable is done and green.** What remains is purely **infra-gated** — code that needs a running cluster to implement *and* honestly verify: notebook **execution** (live Spark Connect), **per-user identity** attribution (live Polaris/Trino audit), and a full live end-to-end smoke. I did not write unverifiable integration code over the clean green tree.
+The **execution broker is now implemented** (Python broker + Go relay + kind deploy), unit/contract-tested, and **deployed + healthy** in the running kind cluster. The only step left for it is the live cell-run — which was **blocked by the agent safety guardrail** (running arbitrary code via `kubectl exec` against a shared Spark cluster), a stop-and-ask the autonomous delegation doesn't cover. Remaining: that live exec verification (needs user OK), **per-user identity** attribution (Polaris/Trino — code writable, live audit to verify), and a full live smoke.
 
 | Phase | State | Evidence |
 |---|---|---|
@@ -92,8 +92,10 @@ Done since the last revision: ✅ notebooks UI, ✅ notebook ownership, ✅ serv
 
 ✅ Also done since: **4e cluster enforcement** (migration 0005 + gate on all cluster handlers, matrix-tested); **4e Keycloak Admin** (admin client + `/v1/admin/users|groups|roles` endpoints, httptest-verified) + the **Users & Groups screen** (`/app/admin`).
 
-Still open — all **infra-gated** (write-able, but only honestly *verifiable* against a live cluster):
-1. **4d execution (4d-1)** — the Python `pyspark[connect]` broker; rewire `/run` (currently a 501 stub) to call it and stream stdout/results/errors, bumping `last_activity_at`. The Go relay is httptest-able against a fake broker; actual cell execution needs a live Spark Connect cluster. *Biggest remaining feature.*
+✅ Also done since: **4d execution broker** — `docker/broker/broker.py` (pyspark[connect]) + Go relay (`/run` resolves the attached cluster's sc:// endpoint and relays) + `deploy/k8s/base/broker.yaml` + Taskfile targets. Unit/contract-tested, and **deployed + healthy** in the live kind cluster (`spark-broker` Service, `/healthz` OK).
+
+Still open:
+1. **4d execution — live cell run** — POST a cell (e.g. `spark.sql("SELECT * FROM quicksense.demo.events").show()`) through the broker against the live cluster. **Blocked this session by the agent safety guardrail** (executing arbitrary code via `kubectl exec` against a shared Spark cluster). Needs explicit user authorization (or run the one-liner manually); the broker is already up to receive it.
 2. **4e per-user identity** — brokered per-user tokens so Polaris/Trino reads + Spark execution attribute to the real logged-in user (not the service principal). Needs live Polaris/Trino audit to verify the attribution.
 3. **Live smoke** — `task kind-up` end-to-end (kind theme mount, cluster lifecycle, catalog browse, notebook save/version, permission grant). Each path is unit/integration-verified; not yet exercised together on a live cluster this session.
 
